@@ -7,6 +7,19 @@ coprime to `N`; output digits are variable-width, MSD-first, tail-aligned onto
 the prompt; the scored ladder shares T values with training — OOD-ness is in
 fresh prompts and unseen moduli, plus T-extrapolation past the trained range).
 
+## Dependencies
+
+`torch` and `matplotlib` only (everything else is stdlib) — both already
+present in the local interpreter, so `explorations/requirements.txt` is
+documentation rather than something you need to install. `jsonargparse` is
+missing locally but is only required to regenerate the *official* datasets via
+`python -m data.squaring_mod`; these scripts call the generator functions
+directly and don't need it.
+
+```bash
+pip install -r explorations/requirements.txt   # no-op on this machine
+```
+
 ## Run order
 
 ```bash

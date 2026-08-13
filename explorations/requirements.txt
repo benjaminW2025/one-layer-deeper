@@ -1,0 +1,26 @@
+# Dependencies for explorations/ only (not the competition package).
+#
+# Verified against the local interpreter (Python 3.12.3): every script here
+# imports and compiles with these already installed, so nothing below needs to
+# be installed on this machine right now. Kept as floors, not pins, because the
+# local versions are older than the repo's pins and both work for these scripts.
+#
+#   local: python 3.12.3, torch 2.7.0, numpy 1.26.4, matplotlib 3.6.3
+#   repo pyproject.toml: python ==3.13.5, torch ==2.12.1, numpy ==2.5.0
+#
+# Everything else the scripts use is stdlib: argparse, csv, json, math,
+# random, statistics, time, sys, pathlib, collections, dataclasses, typing.
+
+# Model, training, profiling (torch.profiler ships with torch).
+torch>=2.7
+
+# Plots in plots.py (Agg backend; no display needed). Pulls numpy itself.
+matplotlib>=3.6
+
+# --- optional -------------------------------------------------------------
+# Only needed to regenerate the OFFICIAL datasets via the repo's CLI
+# (`python -m data.squaring_mod ...`, i.e. scripts/generate_datasets.sh).
+# The explorations do NOT need it: data/squaring_mod.py imports jsonargparse
+# lazily inside cli(), and our harness calls the tokenizer/generator functions
+# directly. This is the one package currently missing locally.
+# jsonargparse==4.49.0
