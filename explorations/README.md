@@ -7,6 +7,25 @@ coprime to `N`; output digits are variable-width, MSD-first, tail-aligned onto
 the prompt; the scored ladder shares T values with training — OOD-ness is in
 fresh prompts and unseen moduli, plus T-extrapolation past the trained range).
 
+## Which interpreter (important)
+
+**Run everything here with `/usr/bin/python`, not the repo's `.venv`.**
+
+| interpreter | torch | CUDA | usable |
+|---|---|---|---|
+| `/usr/bin/python` | 2.7.0 | cu128 | ✅ matches the 12.8 driver |
+| `.venv/bin/python` | 2.13.0 | cu130 | ❌ needs a CUDA 13 driver → CPU fallback |
+
+The `.venv` build is newer than this box's driver, so `torch.cuda.is_available()`
+is False there and runs land on CPU ~200x slower. That silently produced one
+round of invalid wall-clock data (see `results/README_CPU_INVALID.md`).
+`pick_device` now raises rather than falling back, and `results.csv` records
+the device per row.
+
+The `.venv` is still what the *competition* runner needs (pinned deps); it just
+can't reach the GPU on this machine, which will also block local
+tier-faithful `benchmark.runner` runs until its torch is rebuilt for cu128.
+
 ## Dependencies
 
 `torch` and `matplotlib` only (everything else is stdlib) — both already

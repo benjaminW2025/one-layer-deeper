@@ -53,7 +53,7 @@ LADDER: tuple[int, ...] = (1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64)
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 CSV_PATH = RESULTS_DIR / "results.csv"
 CSV_FIELDS = [
-    "run_id", "exp", "regime", "seed", "n_layers", "d_model", "n_heads",
+    "run_id", "exp", "regime", "seed", "device", "n_layers", "d_model", "n_heads",
     "params", "budget_mode", "budget", "steps_completed", "construct_seconds",
     "train_seconds", "lr", "batch_size", "first_train_loss", "final_train_loss",
     "diverged", "flat_from_start", "eval_set", "T", "ood_n", "ood_t", "n_eval",
@@ -431,10 +431,24 @@ class RunConfig:
 
 
 def pick_device(explicit: str | None = None) -> torch.device:
+    """Freest CUDA device, or an explicit one.
+
+    Refuses to silently fall back to CPU: a CPU run is ~200x slower, which
+    silently invalidates every wall-clock number and quietly starves every
+    seconds-budget run. Pass device="cpu" to opt in deliberately.
+    """
     if explicit:
         return torch.device(explicit)
     if not torch.cuda.is_available():
-        return torch.device("cpu")
+        built_for = torch.version.cuda
+        raise RuntimeError(
+            "CUDA is unavailable, refusing to fall back to CPU silently.\n"
+            f"  torch {torch.__version__} built for CUDA {built_for}\n"
+            "  If this is the repo's .venv (torch 2.13.0+cu130) the driver "
+            "(12.8) is too old for it.\n"
+            "  Run explorations with /usr/bin/python (torch 2.7.0+cu128), or "
+            "pass device='cpu' to accept a CPU run."
+        )
     free_bytes = []
     for index in range(torch.cuda.device_count()):
         free, _ = torch.cuda.mem_get_info(index)
@@ -538,7 +552,7 @@ def run_experiment(config: RunConfig, data: DataBundle) -> tuple[list[dict[str, 
         )
         rows.append({
             "run_id": config.run_id, "exp": config.exp, "regime": config.regime,
-            "seed": config.seed, "n_layers": config.n_layers,
+            "seed": config.seed, "device": str(device), "n_layers": config.n_layers,
             "d_model": config.d_model, "n_heads": config.resolved_heads,
             "params": params, "budget_mode": config.budget_mode,
             "budget": config.budget, "steps_completed": step,

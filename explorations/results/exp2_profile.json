@@ -1,0 +1,66 @@
+[
+  {
+    "d_model": 128,
+    "n_layers": 4,
+    "batch_size": 512,
+    "seq_len": 13,
+    "params": 799377,
+    "construct_seconds": 0.011,
+    "compile_seconds": 0.0,
+    "compiled": false,
+    "step_ms": {
+      "data_h2d": 15.784,
+      "forward": 4.324,
+      "backward": 5.539,
+      "optimizer": 0.928
+    },
+    "step_ms_total": 26.575,
+    "step_pct": {
+      "data_h2d": 59.4,
+      "forward": 16.3,
+      "backward": 20.8,
+      "optimizer": 3.5
+    },
+    "bwd_fwd_ratio": 1.281,
+    "est_forward_tflop": 0.0107,
+    "achieved_forward_tflops": 2.47,
+    "peak_tflops_assumed": 90.5,
+    "forward_utilization_pct": 2.7,
+    "ridge_flop_per_byte": 104.7,
+    "projection_intensity_flop_per_byte": 64.0,
+    "predicted_regime": "bandwidth-bound",
+    "kernel_table": "-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  \n                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  \n-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  \n                              Optimizer.step#AdamW.step         0.00%       0.000us         0.00%       0.000us       0.000us       4.215ms        45.28%       4.215ms     843.061us             5  \n    autograd::engine::evaluate_function: AddmmBackward0         1.21%       1.125ms        11.22%      10.418ms     122.560us       0.000us         0.00%       2.422ms      28.498us            85  \n                                           aten::linear         0.92%     851.960us        18.95%      17.590ms     103.468us       0.000us         0.00%       1.887ms      11.103us           170  \nautograd::engine::evaluate_function: NativeLayerNorm...         0.72%     670.429us         3.08%       2.862ms      63.607us       0.000us         0.00%       1.622ms      36.040us            45  \n                                         AddmmBackward0         0.79%     733.371us         7.35%       6.821ms      80.246us       0.000us         0.00%       1.604ms      18.872us            85  \n                                               aten::mm         3.46%       3.214ms         5.49%       5.096ms      29.979us       1.604ms        17.23%       1.604ms       9.436us           170  \n                               NativeLayerNormBackward0         0.15%     140.719us         1.85%       1.715ms      38.105us       0.000us         0.00%       1.500ms      33.330us            45  \n                       aten::native_layer_norm_backward         0.41%     381.183us         1.70%       1.574ms      34.978us       1.500ms        16.11%       1.500ms      33.330us            45  \nvoid at::native::(anonymous namespace)::GammaBetaBac...         0.00%       0.000us         0.00%       0.000us       0.000us       1.156ms        12.42%       1.156ms      25.699us            45  \n                                            aten::copy_         3.29%       3.054ms         7.73%       7.174ms      13.665us       1.117ms        12.00%       1.117ms       2.128us           525  \n                                               aten::to         0.41%     376.970us        15.37%      14.264ms      26.662us       0.000us         0.00%       1.068ms       1.996us           535  \n                                         aten::_to_copy         1.95%       1.808ms        14.96%      13.887ms      27.775us       0.000us         0.00%       1.068ms       2.136us           500  \n                                              aten::sum         1.44%       1.335ms         2.61%       2.423ms      26.924us     864.075us         9.28%     864.075us       9.601us            90  \n                                            aten::addmm         3.19%       2.958ms         4.52%       4.198ms      49.386us     795.662us         8.55%     795.662us       9.361us            85  \nvoid at::native::reduce_kernel<128, 4, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us     734.472us         7.89%     734.472us       9.181us            80  \n-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  \nSelf CPU time total: 92.815ms\nSelf CUDA time total: 9.309ms\n"
+  },
+  {
+    "d_model": 640,
+    "n_layers": 4,
+    "batch_size": 512,
+    "seq_len": 13,
+    "params": 19725457,
+    "construct_seconds": 0.134,
+    "compile_seconds": 0.0,
+    "compiled": false,
+    "step_ms": {
+      "data_h2d": 8.621,
+      "forward": 5.441,
+      "backward": 7.827,
+      "optimizer": 2.6
+    },
+    "step_ms_total": 24.488,
+    "step_pct": {
+      "data_h2d": 35.2,
+      "forward": 22.2,
+      "backward": 32.0,
+      "optimizer": 10.6
+    },
+    "bwd_fwd_ratio": 1.439,
+    "est_forward_tflop": 0.2628,
+    "achieved_forward_tflops": 48.3,
+    "peak_tflops_assumed": 90.5,
+    "forward_utilization_pct": 53.4,
+    "ridge_flop_per_byte": 104.7,
+    "projection_intensity_flop_per_byte": 320.0,
+    "predicted_regime": "compute-bound",
+    "kernel_table": "-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  \n                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  \n-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  \n                                           aten::linear         0.64%     753.354us        14.96%      17.641ms     103.771us       0.000us         0.00%      20.045ms     117.913us           170  \n    autograd::engine::evaluate_function: AddmmBackward0         1.16%       1.373ms         9.00%      10.611ms     124.841us       0.000us         0.00%      19.452ms     228.849us            85  \n                                         AddmmBackward0         0.56%     664.741us         5.81%       6.851ms      80.600us       0.000us         0.00%      18.280ms     215.059us            85  \n                                               aten::mm         2.73%       3.216ms         4.49%       5.299ms      31.173us      18.280ms        31.10%      18.280ms     107.530us           170  \n                              Optimizer.step#AdamW.step         0.00%       0.000us         0.00%       0.000us       0.000us      10.703ms        18.21%      10.703ms       2.141ms             5  \n                              Optimizer.step#AdamW.step         2.78%       3.273ms         6.16%       7.260ms       1.452ms       0.000us         0.00%      10.647ms       2.129ms             5  \n                                            aten::addmm         2.44%       2.878ms         3.59%       4.235ms      49.821us       9.368ms        15.94%       9.368ms     110.210us            85  \nampere_bf16_s1688gemm_bf16_64x128_sliced1x2_ldg8_f2f...         0.00%       0.000us         0.00%       0.000us       0.000us       5.970ms        10.16%       5.970ms     149.258us            40  \nampere_bf16_s1688gemm_bf16_128x128_ldg8_f2f_stages_3...         0.00%       0.000us         0.00%       0.000us       0.000us       5.834ms         9.92%       5.834ms      97.235us            60  \nautograd::engine::evaluate_function: NativeLayerNorm...         0.64%     750.123us         2.52%       2.977ms      66.160us       0.000us         0.00%       3.975ms      88.334us            45  \nampere_bf16_s1688gemm_bf16_128x128_ldg8_relu_f2f_sta...         0.00%       0.000us         0.00%       0.000us       0.000us       3.679ms         6.26%       3.679ms      91.969us            40  \nampere_bf16_s1688gemm_bf16_64x128_sliced1x2_ldg8_rel...         0.00%       0.000us         0.00%       0.000us       0.000us       3.207ms         5.46%       3.207ms     160.371us            20  \n                                            aten::copy_         2.54%       2.996ms         6.17%       7.277ms      13.861us       3.143ms         5.35%       3.143ms       5.987us           525  \nampere_bf16_s1688gemm_bf16_64x128_sliced1x2_ldg8_f2f...         0.00%       0.000us         0.00%       0.000us       0.000us       3.142ms         5.34%       3.142ms     157.094us            20  \nvoid cutlass::Kernel2<cutlass_80_tensorop_bf16_s1681...         0.00%       0.000us         0.00%       0.000us       0.000us       3.138ms         5.34%       3.138ms      78.460us            40  \n-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  \nSelf CPU time total: 117.944ms\nSelf CUDA time total: 58.787ms\n"
+  }
+]
