@@ -5,15 +5,25 @@ target_positions, cross-entropy over valid answer digits only, per-digit
 argmax, exact match = every valid digit correct.
 
 `loss_reduction` is the one deliberate knob:
-    token    mean over every answer digit in the batch (evaluator default;
-             long answers contribute more terms)
-    example  mean per example, then over examples (matches exact-match scoring)
+    token        mean over every answer digit in the batch. The evaluator
+                 default. Long answers contribute more terms than short ones.
+    example      mean per example, then over examples. Weights every example
+                 equally regardless of answer length.
+    example_sum  SUM per example, then mean over examples. Because the readout
+                 is independent per digit, P(exact) = prod_j p_j, so
+                 -log P(all digits correct) = sum_j -log p_j. This reduction is
+                 therefore the exact-match log-likelihood -- the only one of the
+                 three that directly optimizes the scored metric. `example`
+                 divides that by answer length, flattening the incentive to get
+                 every digit right.
 """
 
 from __future__ import annotations
 
 import csv
 import math
+import os
+import subprocess
 import random
 import time
 from collections import Counter
@@ -25,21 +35,20 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from .format import DIGIT_OFFSET, VOCAB_SIZE, collate
 from .model import Encoder, count_parameters
+from .tokenizer import DigitTokenizer, collate
 
 
 # ---------------------------------------------------------------------------
 # batching
 # ---------------------------------------------------------------------------
 
-def tensors_from_records(records: list[dict[str, Any]], max_seq_len: int | None = None):
-    batch = collate(records)
-    if max_seq_len is not None and batch["input_ids"].size(1) < max_seq_len:
-        pad = max_seq_len - batch["input_ids"].size(1)
-        batch["input_ids"] = F.pad(batch["input_ids"], (0, pad), value=0)
-        batch["attention_mask"] = F.pad(batch["attention_mask"], (0, pad), value=False)
-    return batch
+def tensors_from_records(
+    records: list[dict[str, Any]],
+    tokenizer: DigitTokenizer,
+    max_seq_len: int | None = None,
+):
+    return collate(records, tokenizer, max_seq_len)
 
 
 def gather_answer_logits(logits: torch.Tensor, target_positions: torch.Tensor) -> torch.Tensor:
@@ -61,8 +70,13 @@ def answer_loss(
     )
     valid = labels != -100
     counts = valid.sum(dim=1)
-    per_example = (per_token * valid).sum(dim=1) / counts.clamp_min(1)
-    return per_example[counts > 0].mean()
+    totals = (per_token * valid).sum(dim=1)
+    if reduction == "example_sum":
+        # -log P(every digit correct); see module docstring.
+        return totals[counts > 0].mean()
+    if reduction == "example":
+        return (totals / counts.clamp_min(1))[counts > 0].mean()
+    raise ValueError(f"unknown loss reduction {reduction!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +130,12 @@ def evaluate(
     device: torch.device,
     batch_size: int = 1024,
     capture_errors: bool = False,
+    n_loops: int | None = None,
 ) -> tuple[Metrics, list[dict[str, Any]]]:
+    """n_loops overrides a looped model's trained loop count -- lets you
+    scale up computation at eval time (e.g. more loops on longer OOD
+    inputs) without retraining. No-op for non-looped models/models called
+    without this argument."""
     model.eval()
     n = tensors["input_ids"].size(0)
     digit_hits = digit_total = exact_hits = 0
@@ -130,7 +149,8 @@ def evaluate(
         batch = {k: v[start:stop].to(device) for k, v in tensors.items()}
         with torch.autocast(device_type=device.type, dtype=torch.bfloat16,
                             enabled=device.type == "cuda"):
-            logits = model(batch["input_ids"], batch["attention_mask"])
+            kwargs = {"n_loops": n_loops} if n_loops is not None else {}
+            logits = model(batch["input_ids"], batch["attention_mask"], **kwargs)
         predictions = gather_answer_logits(
             logits.float(), batch["target_positions"]
         ).argmax(dim=-1)
@@ -220,8 +240,31 @@ def pick_device(explicit: str | None = None) -> torch.device:
             f"(torch {torch.__version__} built for CUDA {torch.version.cuda}). "
             "Use /usr/bin/python, or pass device='cpu' to opt in."
         )
-    free = [(torch.cuda.mem_get_info(i)[0], i) for i in range(torch.cuda.device_count())]
-    return torch.device(f"cuda:{max(free)[1]}")
+    # Ask nvidia-smi rather than torch.cuda.mem_get_info(i): the latter creates
+    # a CUDA context on every device it queries (~400MB each), which on a shared
+    # box means squatting memory on GPUs we never use.
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    try:
+        output = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=index,memory.free",
+             "--format=csv,noheader,nounits"],
+            text=True, timeout=15,
+        )
+        physical = {}
+        for line in output.strip().splitlines():
+            index, free_mb = (part.strip() for part in line.split(","))
+            physical[int(index)] = int(free_mb)
+        # torch indexes into CUDA_VISIBLE_DEVICES; nvidia-smi indexes physically.
+        order = ([int(v) for v in visible.split(",") if v.strip() != ""]
+                 if visible else sorted(physical))
+        ranked = [(physical.get(dev, -1), logical)
+                  for logical, dev in enumerate(order)
+                  if logical < torch.cuda.device_count()]
+        if ranked:
+            return torch.device(f"cuda:{max(ranked)[1]}")
+    except Exception:
+        pass
+    return torch.device("cuda:0")
 
 
 def train(
@@ -282,11 +325,16 @@ def train(
     }
 
 
-def build_model(dataset_max_seq_len: int, positional: str, d_model: int,
-                n_layers: int, n_heads: int = 4) -> nn.Module:
+def build_model(tokenizer: DigitTokenizer, max_seq_len: int, positional: str,
+                d_model: int, n_layers: int, n_heads: int = 4,
+                abacus_max_k: int = 8, attention_sink: bool = False,
+                n_loops: int = 1) -> nn.Module:
     return Encoder(
-        vocab_size=VOCAB_SIZE, max_seq_len=dataset_max_seq_len, d_model=d_model,
-        n_layers=n_layers, n_heads=n_heads, positional=positional,
+        vocab_size=tokenizer.vocab_size, max_seq_len=max_seq_len,
+        d_model=d_model, n_layers=n_layers, n_heads=n_heads,
+        positional=positional, digit_range=tokenizer.digit_range,
+        abacus_max_k=abacus_max_k, attention_sink=attention_sink,
+        n_loops=n_loops,
     )
 
 
@@ -294,13 +342,43 @@ def build_model(dataset_max_seq_len: int, positional: str, d_model: int,
 # results
 # ---------------------------------------------------------------------------
 
+def save_checkpoint(model: nn.Module, path: Path, meta: dict[str, Any]) -> None:
+    """Save weights plus everything needed to rebuild the model for probing."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({"state_dict": model.state_dict(), "meta": meta}, path)
+
+
+def load_checkpoint(path: Path, tokenizer: DigitTokenizer) -> nn.Module:
+    """Rebuild a saved model. Inverse of save_checkpoint."""
+    blob = torch.load(path, map_location="cpu", weights_only=False)
+    m = blob["meta"]
+    model = build_model(
+        tokenizer, m["max_seq_len"], m["positional"], m["d_model"],
+        m["n_layers"], abacus_max_k=m.get("abacus_max_k", 8),
+        attention_sink=m.get("attention_sink", False),
+        n_loops=m.get("n_loops", 1),
+    )
+    model.load_state_dict(blob["state_dict"])
+    model.eval()
+    return model
+
+
 def append_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_header = not path.exists()
+    fields = list(rows[0])
+    if path.exists():
+        with path.open(newline="") as handle:
+            existing = next(csv.reader(handle), None)
+        if existing is not None and existing != fields:
+            raise ValueError(
+                f"{path.name} has columns {existing}\nbut these rows have "
+                f"{fields}.\nAppending would misalign every column. Move or "
+                "delete the old file first."
+            )
     with path.open("a", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
-        if write_header:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        if not path.exists() or path.stat().st_size == 0:
             writer.writeheader()
         writer.writerows(rows)

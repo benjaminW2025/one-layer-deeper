@@ -36,35 +36,46 @@ Results append to `results/exp*.csv`, one row per (config × cohort).
 | what | where |
 |---|---|
 | These four tasks | [`common/tasks.py`](common/tasks.py) — `build_addition`, `build_square`, `build_reduce`, `build_squaremod` |
-| Tokenization | [`common/format.py`](common/format.py), which imports the competition's own `tokenize_squaring_mod_with_result` and `collate_squaring_mod` from [`data/squaring_mod.py`](../data/squaring_mod.py) — not reimplemented |
+| Tokenization | [`common/tokenizer.py`](common/tokenizer.py) — one `DigitTokenizer` per task, same strategy as the competition |
 | Earlier exploration data | [`explorations/harness.py`](../explorations/harness.py) → `build_data()` |
 | The real competition datasets | [`data/squaring_mod.py`](../data/squaring_mod.py) CLI, driven by [`scripts/generate_datasets.sh`](../scripts/generate_datasets.sh), writing JSONL to `data/generated/` |
 
-## Format (fixed by the evaluator, not by us)
+## Format
 
-Vocab is 17 tokens: `PAD BOS N X T ANS EOS` then digits 0-9 at ids 7-16.
-Numbers are decimal digits, most-significant first, **variable width**.
+Same *strategy* as the competition, sized per task. Each task has its own
+tokenizer in [`common/tokenizer.py`](common/tokenizer.py):
 
-```
-prompt : [N] digits(a) [X] digits(b) [T] digits(c)
-answer : read off the LAST len(answer) positions of the prompt, right-aligned
-```
+| task | prompt | vocab | answer |
+|---|---|---|---|
+| addition | `[X] d(x) [Y] d(y)` | 13 | x + y |
+| square | `[X] d(x) [Y] d(x)` | 13 | x·x |
+| reduce | `[N] d(N) [Y] d(y)` | 13 | y mod N |
+| squaremod | `[N] d(N) [X] d(x)` | 13 | x·x mod N |
 
-The answer is never appended — it is emitted on top of prompt positions. The
-final position is always the ones digit, the one before it the tens digit, and
-so on, so the model can just lay out the zero-padded answer and let the
-evaluator take whatever suffix it needs. Digits are decoded by independent
-per-position argmax: **no autoregression between answer digits**, so every
-carry has to be resolved inside the forward pass.
+Ids: markers `0..m-1`, digits 0-9 at `m..m+9`, PAD at `m+10`. Numbers are
+decimal digits, most-significant first, **variable width** — never zero-padded
+to a fixed size.
 
-Each task reuses the three fields differently:
+The answer is **not appended**. It is read off the last `len(answer)`
+positions of the prompt, right-aligned, exactly as the competition does: the
+final position is always the ones digit, the one before it the tens digit. So
+the model can lay out the zero-padded answer and let the evaluator take
+whatever suffix it needs — it never has to predict the answer's length.
 
-| task | a | b | c | answer |
-|---|---|---|---|---|
-| addition | x | y | 0 | x + y |
-| square | 0 | x | 1 | x·x |
-| reduce | N | y | 1 | y mod N |
-| squaremod | N | x | 1 | x·x mod N |
+Digits are decoded by **independent per-position argmax**. There is no
+autoregression between answer digits, so every carry must be resolved inside
+the forward pass. Loss is cross-entropy over those answer positions only;
+every other position gets zero gradient.
+
+Two deliberate deviations, both forced:
+
+- **Square repeats x in both operand slots.** The format requires
+  `answer_len ≤ prompt_len`, and a 4-digit x squared is 8 digits against a
+  5-token `[X] d(x)` prompt. Writing x·x as two operands fixes that and makes
+  square structurally identical to addition, so exp1 and exp2 differ only in
+  the operator.
+- **`reduce` draws y from [0, N²)**, which is exactly the range squaring
+  produces. If y < N then y mod N = y and the task is a copy.
 
 ## Positional schemes (`--positional`)
 
@@ -75,12 +86,30 @@ Each task reuses the three fields differently:
 | `sinusoidal` | fixed absolute position |
 | `rope` | relative position, applied to q/k |
 | `abacus` | each digit's index within its own number, counted from the right — i.e. its **place value**. No absolute position. Random per-sequence offset during training. |
+| `abacus_learned` | place value **+** absolute. The combination used by [McLeish et al., NeurIPS 2024](https://arxiv.org/abs/2405.17399), whose best results add Abacus alongside a standard positional embedding rather than replacing it. |
 | `abacus_rope` | place value + relative field order |
 
 The motivation: numbers are variable-width, so a digit's place value is its
 distance from the *end of its own field*, and every field boundary shifts when
 `N` has a different digit count. Absolute position cannot express that
 directly, which is the leading suspect for why the baseline fails.
+
+Abacus is from ["Transformers Can Do Arithmetic with the Right
+Embeddings"](https://arxiv.org/abs/2405.17399) (McLeish et al., NeurIPS 2024;
+code at [mcleish7/arithmetic](https://github.com/mcleish7/arithmetic)), which
+trains on <=20-digit operands and generalizes to 120 digits. Note that repo's
+handle matches the author of this competition's scoring commits.
+
+Our indexing direction differs from the paper by necessity: they encode a
+digit's position relative to the START of its number, which equals place value
+because their inputs are least-significant-digit first. Ours are MSD-first, so
+we index from the RIGHT end of each digit run — preserving the property that
+matters (digits of equal significance share an embedding) rather than the
+literal rule.
+
+Not implemented, and the paper's next-biggest win: **input injection** (skip
+connections from the input layer into every block), worth another ~50% error
+reduction on top of Abacus.
 
 ## Reading the results
 

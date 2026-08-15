@@ -34,7 +34,7 @@ from common.model import POSITIONAL_MODES  # noqa: E402
 from common.tasks import build_square  # noqa: E402
 from common.train import (  # noqa: E402
     TrainConfig, append_csv, build_model, evaluate, pick_device,
-    tensors_from_records, train,
+    save_checkpoint, tensors_from_records, train,
 )
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -43,7 +43,7 @@ RESULTS = RESULTS_DIR / "exp2_square.csv"
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--positional", nargs="+", default=["learned"],
+    parser.add_argument("--positional", nargs="+", default=["learned", "abacus"],
                         choices=list(POSITIONAL_MODES))
     parser.add_argument("--train-digits", type=int, nargs="+", default=[1, 2, 3, 4])
     parser.add_argument("--ood-digits", type=int, nargs="+", default=[5, 6])
@@ -54,39 +54,71 @@ def main() -> None:
     parser.add_argument("--n-train", type=int, default=100_000)
     parser.add_argument("--n-eval", type=int, default=2_000)
     parser.add_argument("--lr", type=float, default=3e-4)
-    parser.add_argument("--loss-reduction", default="token", choices=["token", "example"])
+    parser.add_argument("--abacus-max-k", type=int, default=8,
+                        help="random digit-index shift during training; the "
+                             "paper uses 99 for ~120-digit operands, ours are <=7")
+    parser.add_argument("--loss-reduction", default="token", choices=["token", "example", "example_sum"])
+    parser.add_argument("--carryless", action="store_true",
+                        help="target is the digit-wise convolution mod 10: same\nfan-in per place, no carry propagation at all")
+    parser.add_argument("--attention-sink", action="store_true",
+                        help="give each head a learned per-head softmax-denominator "
+                             "scalar (init so it contributes 1), so it can dump "
+                             "attention mass on nothing instead of over irrelevant digits")
+    parser.add_argument("--n-loops", type=int, default=1,
+                        help="--n-layers becomes the number of UNIQUE blocks; the "
+                             "stack runs through them --n-loops times with shared "
+                             "weights (universal-transformer-style recurrence)")
     parser.add_argument("--seeds", type=int, nargs="+", default=[0])
+    parser.add_argument("--save-checkpoints", action="store_true",
+                        help="write results/ckpt/<task>_<positional>_L<n>_d<n>_s<seed>.pt")
     parser.add_argument("--device", default=None)
     args = parser.parse_args()
 
     device = pick_device(args.device)
     data = build_square(
         train_digits=tuple(args.train_digits), ood_digits=tuple(args.ood_digits),
-        n_train=args.n_train, n_eval=args.n_eval,
+        n_train=args.n_train, n_eval=args.n_eval, carryless=args.carryless,
     )
-    max_seq_len = max(
-        len(r["input_ids"])
-        for group in [data.train] + [c.records for c in data.cohorts]
-        for r in group
-    )
+    max_seq_len = data.max_seq_len
     print(f"device={device}  train={len(data.train)}  max_seq_len={max_seq_len}",
           flush=True)
 
-    train_tensors = tensors_from_records(data.train, max_seq_len)
+    train_tensors = tensors_from_records(data.train, data.tokenizer, max_seq_len)
     cohort_tensors = {
-        c.name: (tensors_from_records(c.records, max_seq_len), c.records)
+        c.name: (tensors_from_records(c.records, data.tokenizer, max_seq_len), c.records)
         for c in data.cohorts
     }
 
+    # tag distinguishes sink runs in filenames/CSV so they never collide
+    # with (or silently overwrite, per rows_for()'s "last row wins") a
+    # plain run of the same positional mode; append_csv's schema is fixed
+    # by the first row ever written, so attention_sink can't be its own
+    # column without breaking every existing results file.
     for positional in args.positional:
+        label = f"{positional}+sink" if args.attention_sink else positional
+        if args.n_loops > 1:
+            label += f"+loop{args.n_loops}"
         for seed in args.seeds:
-            model = build_model(max_seq_len, positional, args.d_model, args.n_layers)
+            model = build_model(data.tokenizer, max_seq_len, positional, args.d_model,
+                                    args.n_layers, abacus_max_k=args.abacus_max_k,
+                                    attention_sink=args.attention_sink,
+                                    n_loops=args.n_loops)
             config = TrainConfig(
                 steps=args.steps, batch_size=args.batch_size, lr=args.lr,
                 loss_reduction=args.loss_reduction, seed=seed,
             )
-            print(f"\n=== square positional={positional} seed={seed} ===", flush=True)
+            print(f"\n=== square positional={label} seed={seed} "
+                  f"(n_layers={args.n_layers} x n_loops={args.n_loops} = "
+                  f"{args.n_layers * args.n_loops} effective depth) ===", flush=True)
             summary = train(model, train_tensors, config, device)
+            if args.save_checkpoints:
+                save_checkpoint(model, RESULTS_DIR / "ckpt" /
+                    f"{data.task}_{label}_L{args.n_layers}_d{args.d_model}_s{seed}.pt",
+                    {"max_seq_len": max_seq_len, "positional": positional,
+                     "d_model": args.d_model, "n_layers": args.n_layers,
+                     "abacus_max_k": args.abacus_max_k, "task": "square",
+                     "attention_sink": args.attention_sink, "n_loops": args.n_loops,
+                     "train_digits": args.train_digits})
             print(f"  loss {summary['first_loss']} -> {summary['final_loss']}  "
                   f"({summary['params']:,} params)", flush=True)
 
@@ -102,15 +134,19 @@ def main() -> None:
                         Counter(e["n_wrong_digits"] for e in errors)
                     ),
                     "per_place_acc": metrics.per_place,
-                    "examples": errors[:200],
+                    "examples": errors[:5000],
                 }
                 rows.append({
-                    "task": "square", "positional": positional, "seed": seed,
+                    "task": data.task, "positional": label, "seed": seed,
+                    "train_digits": "-".join(map(str, args.train_digits)),
+                    "ood_digits": "-".join(map(str, args.ood_digits)),
+                    "n_train": len(data.train),
                     "cohort": name, "ood": name.startswith("ood"),
-                    "digits": int(name.split("_")[1].rstrip("d")),
+                    "digits": int(name.split("_")[1].rstrip("d")) if name[-1] == "d" else -1,
                     "d_model": args.d_model, "n_layers": args.n_layers,
                     "steps": summary["steps"], "params": summary["params"],
-                    "lr": args.lr, "loss_reduction": args.loss_reduction,
+                    "lr": args.lr, "abacus_max_k": args.abacus_max_k,
+                    "loss_reduction": args.loss_reduction,
                     "final_loss": summary["final_loss"],
                     "diverged": summary["diverged"], "flat": summary["flat"],
                     "device": summary["device"],
@@ -122,7 +158,7 @@ def main() -> None:
                       flush=True)
             append_csv(RESULTS, rows)
             RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-            (RESULTS_DIR / f"exp2_errors_{positional}_s{seed}.json").write_text(
+            (RESULTS_DIR / f"exp2_errors_{data.task}_{label}_L{args.n_layers}_d{args.d_model}_s{seed}.json").write_text(
                 json.dumps(all_errors, indent=2)
             )
 
