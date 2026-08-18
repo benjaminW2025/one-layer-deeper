@@ -39,6 +39,8 @@ def collate(records: list[dict[str, object]]) -> dict[str, Tensor]:
     labels = torch.full((batch, target_length), -100, dtype=torch.long)
     mask = torch.zeros((batch, input_length), dtype=torch.bool)
     positions = torch.full((batch, target_length), -1, dtype=torch.long)
+    a_values = torch.empty(batch, dtype=torch.long)
+    b_values = torch.empty(batch, dtype=torch.long)
     for row, record in enumerate(records):
         inputs = torch.tensor(record["input_ids"], dtype=torch.long)
         targets = torch.tensor(record["labels"], dtype=torch.long)
@@ -48,7 +50,16 @@ def collate(records: list[dict[str, object]]) -> dict[str, Tensor]:
         positions[row, : targets.numel()] = torch.arange(
             inputs.numel() - targets.numel(), inputs.numel()
         )
-    return {"input_ids": input_ids, "labels": labels, "mask": mask, "positions": positions}
+        a_values[row] = int(record["a"])
+        b_values[row] = int(record["b"])
+    return {
+        "input_ids": input_ids,
+        "labels": labels,
+        "mask": mask,
+        "positions": positions,
+        "a": a_values,
+        "b": b_values,
+    }
 
 
 def load_submission():
@@ -73,12 +84,14 @@ def loss_and_predictions(model, batch: dict[str, Tensor]) -> tuple[Tensor, Tenso
 
 
 @torch.no_grad()
-def evaluate(model, loader: DataLoader, device: torch.device) -> dict[str, float]:
+def evaluate(model, loader: DataLoader, device: torch.device, example_count: int) -> dict[str, object]:
     model.eval()
     exact = 0
     examples = 0
     correct_digits = 0
     digit_count = 0
+    passed: list[dict[str, object]] = []
+    failed: list[dict[str, object]] = []
     context = torch.autocast("cuda", dtype=torch.bfloat16) if device.type == "cuda" else nullcontext()
     for host_batch in loader:
         batch = {name: value.to(device) for name, value in host_batch.items()}
@@ -89,7 +102,28 @@ def evaluate(model, loader: DataLoader, device: torch.device) -> dict[str, float
         examples += prediction.shape[0]
         correct_digits += ((prediction == batch["labels"]) & valid).sum().item()
         digit_count += valid.sum().item()
-    return {"exact_accuracy": exact / examples, "digit_accuracy": correct_digits / digit_count}
+        for row in range(prediction.shape[0]):
+            is_correct = matches[row].all().item()
+            if len(passed if is_correct else failed) >= example_count:
+                continue
+            valid_tokens = valid[row]
+            predicted = "".join(
+                str(token - 7) if 7 <= token <= 16 else f"[{token}]"
+                for token in prediction[row, valid_tokens].tolist()
+            )
+            example = {
+                "a": batch["a"][row].item(),
+                "b": batch["b"][row].item(),
+                "expected": str(batch["a"][row].item() * batch["b"][row].item()),
+                "predicted": predicted,
+            }
+            (passed if is_correct else failed).append(example)
+    return {
+        "exact_accuracy": exact / examples,
+        "digit_accuracy": correct_digits / digit_count,
+        "passed_examples": passed,
+        "failed_examples": failed,
+    }
 
 
 def main() -> None:
@@ -101,6 +135,7 @@ def main() -> None:
     parser.add_argument("--scratchpad_slots", type=int, default=4)
     parser.add_argument("--recurrences", type=int, default=4)
     parser.add_argument("--prompt_reader_layers", type=int, choices=(0, 1), default=0)
+    parser.add_argument("--example_count", type=int, default=5)
     parser.add_argument("--seed", type=int, default=74)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
@@ -153,7 +188,12 @@ def main() -> None:
         "recurrences": args.recurrences,
         "prompt_reader_layers": args.prompt_reader_layers,
     }
-    summary.update({split: evaluate(model, loader, device) for split, loader in loaders.items()})
+    summary.update(
+        {
+            split: evaluate(model, loader, device, args.example_count)
+            for split, loader in loaders.items()
+        }
+    )
     output = ROOT / "controlled_experiments" / "results" / (
         f"multiply_{args.preset}_slots{args.scratchpad_slots}_r{args.recurrences}"
         f"_reader{args.prompt_reader_layers}_s{args.steps}_seed{args.seed}.json"
