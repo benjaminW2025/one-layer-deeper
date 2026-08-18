@@ -16,6 +16,7 @@ import sys
 import time
 
 import torch
+from torch import Tensor
 from torch.utils.data import DataLoader
 
 
@@ -29,9 +30,42 @@ from controlled_experiments.run_multiplication import (
     MultiplicationDataset,
     collate,
     evaluate,
-    load_submission,
     loss_and_predictions,
 )
+
+
+class ExperimentConfig:
+    def __init__(self, vocab_size: int, max_seq_len: int) -> None:
+        self.vocab_size = vocab_size
+        self.max_seq_len = max_seq_len
+
+
+class ExperimentSource:
+    """The fixed controlled-model configuration, independent of submission.py."""
+
+    D_MODEL = 256
+    NUM_HEADS = 4
+    ROPE_BASE = 1000.0
+    TIE_EMBEDDINGS = True
+    EMBED_INIT_STD = 0.02
+    Config = ExperimentConfig
+
+    @classmethod
+    def rope_tables(
+        cls,
+        length: int,
+        head_dim: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> tuple[Tensor, Tensor]:
+        half = head_dim // 2
+        inv_freq = cls.ROPE_BASE ** (
+            -torch.arange(half, device=device, dtype=torch.float32) / half
+        )
+        positions = torch.arange(length, device=device, dtype=torch.float32)
+        angles = positions[:, None] * inv_freq[None, :]
+        angles = torch.cat((angles, angles), dim=-1)
+        return angles.cos().to(dtype), angles.sin().to(dtype)
 
 
 def parse_recurrences(value: str) -> list[int]:
@@ -86,9 +120,8 @@ def main() -> None:
         for dataset in datasets.values()
         for record in dataset.records
     )
-    source = load_submission()
     model = ContextReinjectionTransformer(
-        source,
+        ExperimentSource,
         ModelSpec(17, max_seq_len, 500_000_000),
         args.layers,
         args.max_train_recurrences,
