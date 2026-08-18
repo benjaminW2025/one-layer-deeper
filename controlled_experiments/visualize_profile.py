@@ -212,6 +212,24 @@ def dashboard(path: Path) -> str:
             component_charts.append(
                 chart(f"Block {index} component gradient RMS", component_gradient, logarithmic=True)
             )
+            recurrence_cosine = metric_series(
+                steps,
+                lambda record, names=names: {
+                    name.removeprefix(f"blocks.{index}."):
+                    record.get("per_recurrence_gradient_contributions", {})
+                    .get("parameters", {})
+                    .get(name, {})
+                    .get("repeat_gradient_cosine")
+                    for name in names
+                },
+            )
+            component_charts.append(
+                chart(
+                    f"Block {index}: first-versus-second-repeat gradient cosine",
+                    recurrence_cosine,
+                    fixed_range=(-1.0, 1.0),
+                )
+            )
     config_rows = "".join(
         f"<tr><th>{html.escape(str(key))}</th><td>{html.escape(str(value))}</td></tr>"
         for key, value in config.items()

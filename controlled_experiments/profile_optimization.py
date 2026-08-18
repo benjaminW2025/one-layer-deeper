@@ -230,8 +230,9 @@ def main() -> None:
         datasets["train"], args.batch_size, shuffle=True, drop_last=True, collate_fn=collate
     )
     iterator = iter(train_loader)
-    fixed_probe_loader = DataLoader(datasets["train"], args.batch_size, shuffle=False, collate_fn=collate)
-    fixed_probe_batch = {name: value.to(device) for name, value in next(iter(fixed_probe_loader)).items()}
+    fixed_probe_host_batch = collate(
+        [datasets["train"][index] for index in range(min(args.batch_size, len(datasets["train"])))])
+    fixed_probe_batch = {name: value.to(device) for name, value in fixed_probe_host_batch.items()}
     max_seq_len = max(
         len(record["input_ids"])
         for dataset in datasets.values()

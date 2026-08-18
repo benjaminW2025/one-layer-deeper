@@ -48,6 +48,73 @@ def is_profiled_module(module: torch.nn.Module) -> bool:
     return isinstance(module, (torch.nn.Embedding, torch.nn.Linear, LocalRMSNorm, FullTokenBlock))
 
 
+def recurrent_loss(
+    model: FullTokenTransformer,
+    batch: dict[str, Tensor],
+    *,
+    detach_after_first_repeat: bool,
+) -> Tensor:
+    """Final-answer loss, optionally blocking gradients through repeat one.
+
+    With shared parameters and exactly two repeats, subtracting the resulting
+    round-two-only gradient from the ordinary full gradient gives the gradient
+    contribution from the first use of each parameter.
+    """
+    if model.rounds != 2:
+        raise ValueError("per-recurrence attribution currently requires exactly two repeats")
+    context = model.token_embedding(batch["input_ids"])
+    rope = model.source.rope_tables(
+        context.shape[1],
+        model.source.D_MODEL // model.source.NUM_HEADS,
+        context.device,
+        context.dtype,
+    )
+    for repeat in range(2):
+        if model.round_embeddings is not None:
+            context = context + model.round_embeddings[repeat]
+        for block in model.blocks:
+            context = block(context, batch["mask"], rope)
+        if repeat == 0 and detach_after_first_repeat:
+            context = context.detach()
+    logits = model.head(model.final_norm(context))
+    row = torch.arange(logits.shape[0], device=logits.device)[:, None]
+    selected = logits[row, batch["positions"].clamp_min(0)]
+    valid = batch["labels"] != -100
+    return torch.nn.functional.cross_entropy(selected[valid], batch["labels"][valid])
+
+
+def per_recurrence_gradient_contributions(
+    model: FullTokenTransformer,
+    batch: dict[str, Tensor],
+    autocast_context,
+) -> dict[str, object]:
+    """Attribute final-loss gradients to the first versus second repeat."""
+    named_parameters = list(model.named_parameters())
+    parameters = [parameter for _, parameter in named_parameters]
+    with autocast_context():
+        full_loss = recurrent_loss(model, batch, detach_after_first_repeat=False)
+    full_gradients = torch.autograd.grad(full_loss, parameters)
+    with autocast_context():
+        second_loss = recurrent_loss(model, batch, detach_after_first_repeat=True)
+    second_gradients = torch.autograd.grad(second_loss, parameters)
+    parameter_metrics: dict[str, dict[str, float]] = {}
+    for (name, _), total, second in zip(named_parameters, full_gradients, second_gradients, strict=True):
+        first = total - second
+        first_norm = first.float().square().sum().sqrt().item()
+        second_norm = second.float().square().sum().sqrt().item()
+        cosine = (first.float() * second.float()).sum().item() / (first_norm * second_norm + 1e-12)
+        parameter_metrics[name] = {
+            "repeat_1_gradient_norm": first_norm,
+            "repeat_2_gradient_norm": second_norm,
+            "repeat_gradient_cosine": cosine,
+        }
+    return {
+        "full_loss": full_loss.item(),
+        "detached_first_repeat_loss": second_loss.item(),
+        "parameters": parameter_metrics,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task", choices=("multiplication", "squaring"), default="squaring")
@@ -92,8 +159,9 @@ def main() -> None:
     train_loader = DataLoader(
         datasets["train"], args.batch_size, shuffle=True, drop_last=True, collate_fn=collate
     )
-    fixed_probe_loader = DataLoader(datasets["train"], args.batch_size, shuffle=False, collate_fn=collate)
-    fixed_probe_batch = {name: value.to(device) for name, value in next(iter(fixed_probe_loader)).items()}
+    fixed_probe_host_batch = collate(
+        [datasets["train"][index] for index in range(min(args.batch_size, len(datasets["train"])))])
+    fixed_probe_batch = {name: value.to(device) for name, value in fixed_probe_host_batch.items()}
     iterator = iter(train_loader)
     max_seq_len = max(
         len(record["input_ids"])
@@ -235,6 +303,10 @@ def main() -> None:
                 record["fixed_probe"] = gradient_alignment(
                     model, fixed_probe_batch, args.probe_horizons, autocast_context
                 )
+                if rounds == 2:
+                    record["per_recurrence_gradient_contributions"] = (
+                        per_recurrence_gradient_contributions(model, fixed_probe_batch, autocast_context)
+                    )
             handle.write(json.dumps(record) + "\n")
             if step % args.flush_every == 0 or step == args.steps:
                 handle.flush()
