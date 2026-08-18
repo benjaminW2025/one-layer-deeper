@@ -244,3 +244,22 @@ python3 controlled_experiments/run_variable_recurrence.py \
 If accuracy remains strong or improves beyond the trained depths, the repeated
 macro-step is acting as stable refinement. If it falls with additional steps,
 the model is still relying on a depth-specific computation.
+
+## Optimization profile
+
+Profile the current four-distinct-block, two-repeat full-token reference
+before changing its optimizer. The profiler writes one JSON object per logged
+step, including loss, global gradient norm before clipping, per-block gradient
+and update scales, activation/change RMS for each block application, and the
+cosine similarity between gradients obtained after one versus two recurrences.
+
+```bash
+python3 controlled_experiments/profile_optimization.py \
+  --task squaring --preset easy --steps 2000 \
+  --architecture recurrent --layers 4 --recurrences 2 \
+  --log_every 100 --probe_every 500
+```
+
+For the 8-layer reference, use `--architecture full_token --layers 8`. Compare
+the per-block update scales and the recurrent gradient-alignment records, not
+just final accuracy.
