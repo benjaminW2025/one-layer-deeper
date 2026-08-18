@@ -14,6 +14,7 @@ from pathlib import Path
 import random
 
 
+EXPERIMENT_ROOT = Path(__file__).resolve().parent
 TOKEN_IDS = {"PAD": 0, "BOS": 1, "A": 2, "B": 3, "ANS": 4, "EOS": 5}
 DIGIT_OFFSET = 7
 VOCAB_SIZE = DIGIT_OFFSET + 10
@@ -144,7 +145,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--preset", choices=tuple(PRESETS), required=True)
     parser.add_argument(
-        "--output_root", type=Path, default=Path("controlled_experiments/data")
+        "--output_root", type=Path, default=EXPERIMENT_ROOT / "data"
     )
     parser.add_argument("--seed", type=int, default=45)
     args = parser.parse_args()

@@ -152,6 +152,7 @@ def main() -> None:
     root = ROOT / "controlled_experiments" / "data" / f"multiplication_{args.preset}"
     train = MultiplicationDataset(root / "train.jsonl")
     loaders = {
+        "train": DataLoader(train, args.batch_size, collate_fn=collate),
         "test": DataLoader(MultiplicationDataset(root / "test.jsonl"), args.batch_size, collate_fn=collate),
         "ood_one_long": DataLoader(MultiplicationDataset(root / "ood_one_long.jsonl"), args.batch_size, collate_fn=collate),
         "ood_both_long": DataLoader(MultiplicationDataset(root / "ood_both_long.jsonl"), args.batch_size, collate_fn=collate),
