@@ -74,3 +74,69 @@ Run the current scratchpad architecture locally with, for example:
 ```bash
 python3 controlled_experiments/run_multiplication.py --preset easy --steps 2000
 ```
+
+## Baseline protocol
+
+The first multiplication baseline is the current compact scratchpad model:
+
+```text
+width:                    256
+scratchpad slots:         4
+different shared layers:  2
+recurrent rounds:         4
+scratchpad updates:       8
+prompt reader:            none (raw fixed prompt embeddings)
+answer reader:            one layer
+optimizer:                AdamW, lr 2e-3
+batch size:               256
+training budget:          2,000 updates
+compilation:              off
+seed:                     74
+```
+
+Evaluate exact and per-digit accuracy on `test`, `ood_one_long`, and
+`ood_both_long`. Record wall-clock time, but do not use it to choose the first
+architecture winner: all initial comparisons use the same update count.
+
+## First architecture test: prompt reader
+
+**Question:** Does the scratchpad fail because it repeatedly reads raw digits
+that do not yet know their field or decimal-place role?
+
+Add exactly one bidirectional self-attention/MLP layer over the fixed prompt
+before initializing recurrence:
+
+```text
+raw A/B decimal prompt -> one prompt-reader layer -> fixed context -> scratchpad
+```
+
+The recurrent scratchpad, answer reader, optimizer, batch size, and 2,000-step
+budget stay unchanged. Compare its result to the baseline, especially on the
+two OOD splits.
+
+Interpretation:
+
+```text
+better held-out and OOD accuracy:
+    making digit roles explicit in the fixed context is useful
+
+only better in-range accuracy:
+    likely extra capacity, not length generalization
+
+no improvement:
+    prioritize the recurrent number representation or output-writing path
+```
+
+Commands for the matched pair:
+
+```bash
+# Baseline
+python3 controlled_experiments/run_multiplication.py \
+  --preset easy --steps 2000 --scratchpad_slots 4 --recurrences 4 \
+  --prompt_reader_layers 0
+
+# First experiment: one fixed prompt-reader layer
+python3 controlled_experiments/run_multiplication.py \
+  --preset easy --steps 2000 --scratchpad_slots 4 --recurrences 4 \
+  --prompt_reader_layers 1
+```

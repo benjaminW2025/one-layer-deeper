@@ -98,6 +98,9 @@ def main() -> None:
     parser.add_argument("--steps", type=int, required=True)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--lr", type=float, default=2e-3)
+    parser.add_argument("--scratchpad_slots", type=int, default=4)
+    parser.add_argument("--recurrences", type=int, default=4)
+    parser.add_argument("--prompt_reader_layers", type=int, choices=(0, 1), default=0)
     parser.add_argument("--seed", type=int, default=74)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
@@ -117,6 +120,9 @@ def main() -> None:
     iterator = iter(train_loader)
 
     submission = load_submission()
+    submission.NUM_SCRATCH_TOKENS = args.scratchpad_slots
+    submission.NUM_RECURRENCES = args.recurrences
+    submission.NUM_PROMPT_READER_LAYERS = args.prompt_reader_layers
     model = submission.build_model(ModelSpec(17, 14, 500_000_000)).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.95), weight_decay=0.1)
     autocast = torch.autocast("cuda", dtype=torch.bfloat16) if device.type == "cuda" else nullcontext()
@@ -138,9 +144,20 @@ def main() -> None:
         if step == 1 or step % 100 == 0:
             print(json.dumps({"step": step, "loss": loss.item(), "seconds": time.monotonic() - started}))
 
-    summary = {"preset": args.preset, "steps": args.steps, "batch_size": args.batch_size, "lr": args.lr}
+    summary = {
+        "preset": args.preset,
+        "steps": args.steps,
+        "batch_size": args.batch_size,
+        "lr": args.lr,
+        "scratchpad_slots": args.scratchpad_slots,
+        "recurrences": args.recurrences,
+        "prompt_reader_layers": args.prompt_reader_layers,
+    }
     summary.update({split: evaluate(model, loader, device) for split, loader in loaders.items()})
-    output = ROOT / "controlled_experiments" / "results" / f"multiply_{args.preset}_s{args.steps}_seed{args.seed}.json"
+    output = ROOT / "controlled_experiments" / "results" / (
+        f"multiply_{args.preset}_slots{args.scratchpad_slots}_r{args.recurrences}"
+        f"_reader{args.prompt_reader_layers}_s{args.steps}_seed{args.seed}.json"
+    )
     output.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(summary, indent=2, sort_keys=True))
     print(f"wrote {output}")
