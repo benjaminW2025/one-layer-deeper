@@ -1,0 +1,34 @@
+{
+  "kind": "controlled_decimal_multiplication",
+  "preset": {
+    "examples_per_id_cell": 2000,
+    "examples_per_ood_cell": 500,
+    "id_digits": [
+      3,
+      4
+    ],
+    "name": "easy",
+    "ood_digits": [
+      5
+    ],
+    "train_fraction": 0.8
+  },
+  "seed": 45,
+  "separate_input_output": true,
+  "splits": {
+    "ood_both_long": 500,
+    "ood_one_long": 2000,
+    "test": 1600,
+    "train": 6400
+  },
+  "token_ids": {
+    "A": 2,
+    "ANS": 4,
+    "B": 3,
+    "BOS": 1,
+    "DIGIT_OFFSET": 7,
+    "EOS": 5,
+    "PAD": 0
+  },
+  "vocab_size": 17
+}
