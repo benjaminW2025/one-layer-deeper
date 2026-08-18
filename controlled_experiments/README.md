@@ -140,3 +140,19 @@ python3 controlled_experiments/run_multiplication.py \
   --preset easy --steps 2000 --scratchpad_slots 4 --recurrences 4 \
   --prompt_reader_layers 1
 ```
+
+## Learnability sanity check: ordinary Transformer
+
+Before interpreting scratchpad failures as an arithmetic limitation, run a
+normal bidirectional Transformer that updates every input position at every
+layer. It has no scratchpad, fixed context, or recurrence:
+
+```bash
+python3 controlled_experiments/run_multiplication.py \
+  --preset easy --steps 2000 --architecture full_token --full_token_layers 8
+```
+
+This model has more parameters than the compact scratchpad baseline, so it is
+not a fair efficiency comparison. It answers a narrower question: can a normal
+Transformer fit this dataset and achieve nontrivial length generalization under
+the same optimizer and update budget?

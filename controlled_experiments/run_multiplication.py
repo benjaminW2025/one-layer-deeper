@@ -79,6 +79,35 @@ def load_submission():
     return module
 
 
+class FullTokenTransformer(torch.nn.Module):
+    """A conventional bidirectional Transformer for the learnability check."""
+
+    def __init__(self, source, spec: ModelSpec, layers: int) -> None:
+        super().__init__()
+        self.source = source
+        self.config = source.Config(spec.vocab_size, spec.max_seq_len)
+        self.token_embedding = torch.nn.Embedding(spec.vocab_size, source.D_MODEL)
+        self.blocks = torch.nn.ModuleList(source.PromptReaderBlock() for _ in range(layers))
+        self.final_norm = source.RMSNorm(source.D_MODEL)
+        self.head = torch.nn.Linear(source.D_MODEL, spec.vocab_size, bias=False)
+        if source.TIE_EMBEDDINGS:
+            self.head.weight = self.token_embedding.weight
+        if source.EMBED_INIT_STD is not None:
+            torch.nn.init.normal_(self.token_embedding.weight, std=source.EMBED_INIT_STD)
+
+    def forward(self, input_ids: Tensor, attention_mask: Tensor | None = None):
+        context = self.token_embedding(input_ids)
+        rope = self.source.rope_tables(
+            input_ids.shape[1],
+            self.source.D_MODEL // self.source.NUM_HEADS,
+            context.device,
+            context.dtype,
+        )
+        for block in self.blocks:
+            context = block(context, attention_mask, rope)
+        return self.head(self.final_norm(context)), None
+
+
 def loss_and_predictions(model, batch: dict[str, Tensor]) -> tuple[Tensor, Tensor, Tensor]:
     logits, _ = model(batch["input_ids"], attention_mask=batch["mask"])
     row = torch.arange(logits.shape[0], device=logits.device)[:, None]
@@ -137,6 +166,8 @@ def main() -> None:
     parser.add_argument("--steps", type=int, required=True)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--lr", type=float, default=2e-3)
+    parser.add_argument("--architecture", choices=("scratchpad", "full_token"), default="scratchpad")
+    parser.add_argument("--full_token_layers", type=int, default=8)
     parser.add_argument("--scratchpad_slots", type=int, default=4)
     parser.add_argument("--recurrences", type=int, default=4)
     parser.add_argument("--prompt_reader_layers", type=int, choices=(0, 1), default=0)
@@ -164,7 +195,12 @@ def main() -> None:
     submission.NUM_SCRATCH_TOKENS = args.scratchpad_slots
     submission.NUM_RECURRENCES = args.recurrences
     submission.NUM_PROMPT_READER_LAYERS = args.prompt_reader_layers
-    model = submission.build_model(ModelSpec(17, 14, 500_000_000)).to(device)
+    model_spec = ModelSpec(17, 14, 500_000_000)
+    if args.architecture == "scratchpad":
+        model = submission.build_model(model_spec)
+    else:
+        model = FullTokenTransformer(submission, model_spec, args.full_token_layers)
+    model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.95), weight_decay=0.1)
     autocast = torch.autocast("cuda", dtype=torch.bfloat16) if device.type == "cuda" else nullcontext()
     started = time.monotonic()
@@ -187,12 +223,15 @@ def main() -> None:
 
     summary = {
         "preset": args.preset,
+        "architecture": args.architecture,
         "steps": args.steps,
         "batch_size": args.batch_size,
         "lr": args.lr,
         "scratchpad_slots": args.scratchpad_slots,
         "recurrences": args.recurrences,
         "prompt_reader_layers": args.prompt_reader_layers,
+        "full_token_layers": args.full_token_layers,
+        "parameter_count": sum(parameter.numel() for parameter in model.parameters()),
     }
     summary.update(
         {
@@ -201,7 +240,7 @@ def main() -> None:
         }
     )
     output = ROOT / "controlled_experiments" / "results" / (
-        f"multiply_{args.preset}_slots{args.scratchpad_slots}_r{args.recurrences}"
+        f"multiply_{args.preset}_{args.architecture}_slots{args.scratchpad_slots}_r{args.recurrences}"
         f"_reader{args.prompt_reader_layers}_s{args.steps}_seed{args.seed}.json"
     )
     output.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
