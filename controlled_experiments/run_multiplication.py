@@ -11,6 +11,7 @@ import sys
 import time
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
@@ -79,6 +80,58 @@ def load_submission():
     return module
 
 
+def apply_rope(x: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
+    half = x.shape[-1] // 2
+    rotated = torch.cat((-x[..., half:], x[..., :half]), dim=-1)
+    return x * cos + rotated * sin
+
+
+class LocalRMSNorm(torch.nn.Module):
+    def __init__(self, width: int) -> None:
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.ones(width))
+
+    def forward(self, x: Tensor) -> Tensor:
+        return F.rms_norm(x, (x.shape[-1],), self.weight)
+
+
+class FullTokenBlock(torch.nn.Module):
+    """One normal bidirectional Transformer block, independent of submission code."""
+
+    def __init__(self, width: int, heads: int) -> None:
+        super().__init__()
+        self.width = width
+        self.heads = heads
+        self.attention_norm = LocalRMSNorm(width)
+        self.qkv = torch.nn.Linear(width, 3 * width)
+        self.out = torch.nn.Linear(width, width)
+        self.mixer_norm = LocalRMSNorm(width)
+        self.up = torch.nn.Linear(width, 4 * width)
+        self.down = torch.nn.Linear(4 * width, width)
+
+    def forward(
+        self,
+        context: Tensor,
+        attention_mask: Tensor | None,
+        rope: tuple[Tensor, Tensor],
+    ) -> Tensor:
+        residual = context
+        context = self.attention_norm(context)
+        batch, length, _ = context.shape
+        q, k, v = self.qkv(context).chunk(3, dim=-1)
+        q = q.view(batch, length, self.heads, -1).transpose(1, 2)
+        k = k.view(batch, length, self.heads, -1).transpose(1, 2)
+        v = v.view(batch, length, self.heads, -1).transpose(1, 2)
+        cos, sin = rope
+        q = apply_rope(q, cos, sin)
+        k = apply_rope(k, cos, sin)
+        mask = attention_mask[:, None, None, :].bool() if attention_mask is not None else None
+        context = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        context = context.transpose(1, 2).contiguous().view(batch, length, self.width)
+        context = residual + self.out(context)
+        return context + self.down(F.gelu(self.up(self.mixer_norm(context))))
+
+
 class FullTokenTransformer(torch.nn.Module):
     """A conventional bidirectional Transformer for the learnability check."""
 
@@ -87,8 +140,10 @@ class FullTokenTransformer(torch.nn.Module):
         self.source = source
         self.config = source.Config(spec.vocab_size, spec.max_seq_len)
         self.token_embedding = torch.nn.Embedding(spec.vocab_size, source.D_MODEL)
-        self.blocks = torch.nn.ModuleList(source.PromptReaderBlock() for _ in range(layers))
-        self.final_norm = source.RMSNorm(source.D_MODEL)
+        self.blocks = torch.nn.ModuleList(
+            FullTokenBlock(source.D_MODEL, source.NUM_HEADS) for _ in range(layers)
+        )
+        self.final_norm = LocalRMSNorm(source.D_MODEL)
         self.head = torch.nn.Linear(source.D_MODEL, spec.vocab_size, bias=False)
         if source.TIE_EMBEDDINGS:
             self.head.weight = self.token_embedding.weight
