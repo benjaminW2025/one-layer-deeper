@@ -223,3 +223,24 @@ python3 controlled_experiments/run_multiplication.py \
   --task squaring --preset easy --steps 2000 \
   --architecture full_token --full_token_layers 8
 ```
+
+## Variable-recurrence macro-step test
+
+This is the next test after the four-distinct-block, two-recurrence model. It
+keeps a frozen prompt context `C` and mutable workspace `S`. Each of four
+distinct blocks updates `S` by querying `S` and reading keys/values from
+`[C, S]`. The four-block macro-step is reused.
+
+During training, each batch uses a randomly selected 2, 3, or 4 macro-steps.
+The final answer is the only target. At the end, the script evaluates the same
+checkpoint at 1, 2, 3, 4, 6, and 8 macro-steps on every available split:
+
+```bash
+python3 controlled_experiments/run_variable_recurrence.py \
+  --task squaring --preset easy --steps 2000 --layers 4 \
+  --min_train_recurrences 2 --max_train_recurrences 4
+```
+
+If accuracy remains strong or improves beyond the trained depths, the repeated
+macro-step is acting as stable refinement. If it falls with additional steps,
+the model is still relying on a depth-specific computation.
