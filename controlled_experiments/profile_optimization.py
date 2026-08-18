@@ -117,6 +117,23 @@ def aggregate_parameter_metrics(
     }
 
 
+def norm_parameter_metrics(
+    named_parameters: list[tuple[str, Tensor]], before_step: dict[str, Tensor]
+) -> dict[str, dict[str, float]]:
+    """Keep the learned RMSNorm scales separate from their surrounding blocks."""
+    output = {}
+    for name, parameter in named_parameters:
+        if not (name.endswith("attention_norm.weight") or name.endswith("mixer_norm.weight") or name == "final_norm.weight"):
+            continue
+        update = parameter.detach().float() - before_step[name]
+        output[name] = {
+            "parameter_rms": rms(parameter),
+            "gradient_rms": rms(parameter.grad) if parameter.grad is not None else 0.0,
+            "update_rms": rms(update),
+        }
+    return output
+
+
 def gradient_alignment(
     model: FullTokenTransformer,
     batch: dict[str, Tensor],
@@ -128,6 +145,7 @@ def gradient_alignment(
     named_parameters = list(model.named_parameters())
     gradient_sets: dict[int, dict[str, list[Tensor | None]]] = {}
     losses: dict[str, float] = {}
+    gradient_norms: dict[str, float] = {}
     for horizon in horizons:
         model.rounds = horizon
         with autocast_context():
@@ -138,6 +156,9 @@ def gradient_alignment(
             grouped.setdefault(parameter_group(name), []).append(gradient.detach())
         gradient_sets[horizon] = grouped
         losses[str(horizon)] = loss.item()
+        gradient_norms[str(horizon)] = sum(
+            gradient.detach().float().square().sum().item() for gradient in gradients
+        ) ** 0.5
     model.rounds = original_rounds
 
     alignment: dict[str, dict[str, float]] = {}
@@ -158,7 +179,11 @@ def gradient_alignment(
                 first_sq += first_gradient.float().square().sum().item()
                 later_sq += later_gradient.float().square().sum().item()
             alignment[pair][group] = dot / ((first_sq * later_sq) ** 0.5 + 1e-12)
-    return {"loss_by_horizon": losses, "cosine_by_group": alignment}
+    return {
+        "loss_by_horizon": losses,
+        "gradient_norm_by_horizon": gradient_norms,
+        "cosine_by_group": alignment,
+    }
 
 
 def main() -> None:
@@ -205,6 +230,8 @@ def main() -> None:
         datasets["train"], args.batch_size, shuffle=True, drop_last=True, collate_fn=collate
     )
     iterator = iter(train_loader)
+    fixed_probe_loader = DataLoader(datasets["train"], args.batch_size, shuffle=False, collate_fn=collate)
+    fixed_probe_batch = {name: value.to(device) for name, value in next(iter(fixed_probe_loader)).items()}
     max_seq_len = max(
         len(record["input_ids"])
         for dataset in datasets.values()
@@ -304,10 +331,11 @@ def main() -> None:
                 "global_gradient_norm_before_clip": raw_global_gradient_norm,
                 "activation": dict(activation_stats),
                 "parameter_groups": aggregate_parameter_metrics(named_parameters, before_step),
+                "rmsnorm_parameters": norm_parameter_metrics(named_parameters, before_step),
             }
             if args.probe_every and (step == 1 or step % args.probe_every == 0 or step == args.steps):
                 record["gradient_alignment"] = gradient_alignment(
-                    model, batch, args.probe_horizons, autocast_context
+                    model, fixed_probe_batch, args.probe_horizons, autocast_context
                 )
             line = json.dumps(record)
             handle.write(line + "\n")

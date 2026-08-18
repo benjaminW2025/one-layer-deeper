@@ -120,9 +120,15 @@ def metric_series(
 
 def dashboard(path: Path) -> str:
     config, steps = load_profile(path)
+    full_trace = "parameters" in steps[0]
     loss = metric_series(steps, lambda record: {"loss": record["loss"]})
     global_grad = metric_series(
-        steps, lambda record: {"global gradient norm": record["global_gradient_norm_before_clip"]}
+        steps,
+        lambda record: {
+            "global gradient norm": record.get(
+                "global_gradient_norm_before_clip", record.get("global_gradient_norm_raw")
+            )
+        },
     )
     block_grad = metric_series(
         steps,
@@ -145,17 +151,67 @@ def dashboard(path: Path) -> str:
         lambda record: {
             call: values["change_rms"] / max(values["output_rms"], 1e-12)
             for call, values in record.get("activation", {}).items()
+            if values.get("change_rms") is not None
         },
     )
     alignment = metric_series(
         steps,
         lambda record: {
             f"{pair} {group}": cosine
-            for pair, groups in record.get("gradient_alignment", {}).get("cosine_by_group", {}).items()
+            for pair, groups in record.get("gradient_alignment", record.get("fixed_probe", {}))
+            .get("cosine_by_group", {})
+            .items()
             for group, cosine in groups.items()
             if group.startswith("block_")
         },
     )
+    norm_scales = metric_series(
+        steps,
+        lambda record: {
+            name: values["parameter_rms"]
+            for name, values in (
+                record.get("rmsnorm_parameters")
+                or {
+                    name: values
+                    for name, values in record.get("parameters", {}).items()
+                    if "norm.weight" in name
+                }
+            ).items()
+        },
+    )
+    fixed_probe_norm = metric_series(
+        steps,
+        lambda record: {
+            f"after {horizon} repeat(s)": value
+            for horizon, value in record.get("gradient_alignment", record.get("fixed_probe", {}))
+            .get("gradient_norm_by_horizon", {})
+            .items()
+        },
+    )
+    component_charts = []
+    if full_trace:
+        component_names = sorted(
+            {
+                name
+                for record in steps
+                for name in record.get("parameters", {})
+                if name.startswith("blocks.") and name.endswith(".weight")
+            }
+        )
+        block_indices = sorted({name.split(".")[1] for name in component_names})
+        for index in block_indices:
+            names = [name for name in component_names if name.startswith(f"blocks.{index}.")]
+            component_gradient = metric_series(
+                steps,
+                lambda record, names=names: {
+                    name.removeprefix(f"blocks.{index}."):
+                    record.get("parameters", {}).get(name, {}).get("gradient_rms_raw")
+                    for name in names
+                },
+            )
+            component_charts.append(
+                chart(f"Block {index} component gradient RMS", component_gradient, logarithmic=True)
+            )
     config_rows = "".join(
         f"<tr><th>{html.escape(str(key))}</th><td>{html.escape(str(value))}</td></tr>"
         for key, value in config.items()
@@ -166,8 +222,11 @@ def dashboard(path: Path) -> str:
         chart("Global gradient norm before clipping", global_grad, logarithmic=True),
         chart("Per-block gradient RMS (after global clipping)", block_grad, logarithmic=True),
         chart("Per-block update / parameter RMS", update_ratio, logarithmic=True),
+        chart("Learned RMSNorm scale RMS", norm_scales, logarithmic=False),
         chart("Relative residual change for each block use", change_ratio, logarithmic=False),
+        chart("Fixed-probe gradient norm by recurrence horizon", fixed_probe_norm, logarithmic=True),
         chart("Gradient cosine: answer after one versus two repeats", alignment, fixed_range=(-1.0, 1.0)),
+        *component_charts,
     ]
     visible_charts = "\n".join(item for item in charts if item)
     return f"""
