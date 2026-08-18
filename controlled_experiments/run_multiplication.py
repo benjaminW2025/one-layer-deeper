@@ -7,16 +7,21 @@ from contextlib import nullcontext
 import importlib.util
 import json
 from pathlib import Path
+import sys
 import time
 
 import torch
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
-from benchmark import ModelSpec
-
 
 ROOT = Path(__file__).resolve().parents[1]
+# Allow `python path/to/run_multiplication.py ...` from a remote shell. Python
+# otherwise adds only controlled_experiments/ to sys.path, not the repo root.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from benchmark import ModelSpec
 
 
 class MultiplicationDataset(Dataset):
