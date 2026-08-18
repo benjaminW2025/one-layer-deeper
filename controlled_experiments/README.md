@@ -189,6 +189,22 @@ python3 controlled_experiments/run_context_reinjection.py \
   --task squaring --preset easy --steps 2000 --layers 2 --recurrences 4
 ```
 
+## Two-tape composition test
+
+This is the structured pipeline test with no scratchpad:
+
+```text
+fixed input context -> product tape -> accumulator tape -> answer slots
+```
+
+The product tape cannot read the accumulator in the same round; the
+accumulator reads the freshly updated product tape. Run it with:
+
+```bash
+python3 controlled_experiments/run_two_tape.py \
+  --task squaring --preset easy --steps 2000 --recurrences 4
+```
+
 ## Direct squaring with answer slots
 
 Generate explicit-output squaring data with:
