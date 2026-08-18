@@ -177,6 +177,18 @@ python3 controlled_experiments/run_multiplication.py \
   --round_embeddings
 ```
 
+## Fixed-context reinjection control
+
+This test keeps the original prompt embeddings frozen and gives a mutable
+full-token work sequence access to them at every shared update. It has two
+distinct full-token blocks repeated four times, matching the recurrent control
+above:
+
+```bash
+python3 controlled_experiments/run_context_reinjection.py \
+  --task squaring --preset easy --steps 2000 --layers 2 --recurrences 4
+```
+
 ## Direct squaring with answer slots
 
 Generate explicit-output squaring data with:
