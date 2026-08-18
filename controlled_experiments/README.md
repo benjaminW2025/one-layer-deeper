@@ -157,6 +157,16 @@ not a fair efficiency comparison. It answers a narrower question: can a normal
 Transformer fit this dataset and achieve nontrivial length generalization under
 the same optimizer and update budget?
 
+For the tighter writable-state control, use two full-token blocks reused for
+four rounds. This has the same number of distinct core blocks and core-block
+applications as the scratchpad baseline, but updates every token position:
+
+```bash
+python3 controlled_experiments/run_multiplication.py \
+  --task squaring --preset easy --steps 2000 \
+  --architecture full_token_recurrent --full_token_layers 2 --recurrences 4
+```
+
 ## Direct squaring with answer slots
 
 Generate explicit-output squaring data with:

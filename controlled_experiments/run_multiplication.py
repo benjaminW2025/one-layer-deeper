@@ -135,9 +135,10 @@ class FullTokenBlock(torch.nn.Module):
 class FullTokenTransformer(torch.nn.Module):
     """A conventional bidirectional Transformer for the learnability check."""
 
-    def __init__(self, source, spec: ModelSpec, layers: int) -> None:
+    def __init__(self, source, spec: ModelSpec, layers: int, rounds: int = 1) -> None:
         super().__init__()
         self.source = source
+        self.rounds = rounds
         self.config = source.Config(spec.vocab_size, spec.max_seq_len)
         self.token_embedding = torch.nn.Embedding(spec.vocab_size, source.D_MODEL)
         self.blocks = torch.nn.ModuleList(
@@ -158,8 +159,9 @@ class FullTokenTransformer(torch.nn.Module):
             context.device,
             context.dtype,
         )
-        for block in self.blocks:
-            context = block(context, attention_mask, rope)
+        for _ in range(self.rounds):
+            for block in self.blocks:
+                context = block(context, attention_mask, rope)
         return self.head(self.final_norm(context)), None
 
 
@@ -226,7 +228,11 @@ def main() -> None:
     parser.add_argument("--steps", type=int, required=True)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--lr", type=float, default=2e-3)
-    parser.add_argument("--architecture", choices=("scratchpad", "full_token"), default="scratchpad")
+    parser.add_argument(
+        "--architecture",
+        choices=("scratchpad", "full_token", "full_token_recurrent"),
+        default="scratchpad",
+    )
     parser.add_argument("--full_token_layers", type=int, default=8)
     parser.add_argument("--scratchpad_slots", type=int, default=4)
     parser.add_argument("--recurrences", type=int, default=4)
@@ -267,7 +273,10 @@ def main() -> None:
     if args.architecture == "scratchpad":
         model = submission.build_model(model_spec)
     else:
-        model = FullTokenTransformer(submission, model_spec, args.full_token_layers)
+        rounds = args.recurrences if args.architecture == "full_token_recurrent" else 1
+        model = FullTokenTransformer(
+            submission, model_spec, args.full_token_layers, rounds
+        )
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.95), weight_decay=0.1)
     autocast = torch.autocast("cuda", dtype=torch.bfloat16) if device.type == "cuda" else nullcontext()
