@@ -156,3 +156,22 @@ This model has more parameters than the compact scratchpad baseline, so it is
 not a fair efficiency comparison. It answers a narrower question: can a normal
 Transformer fit this dataset and achieve nontrivial length generalization under
 the same optimizer and update budget?
+
+## Direct squaring with answer slots
+
+Generate explicit-output squaring data with:
+
+```bash
+python3 controlled_experiments/generate_squaring.py --preset easy
+```
+
+Each prompt has the form `X <digits> ANS OUT OUT ...`. Every `OUT` position is
+supervised. Targets have a fixed width for their input-length cell and are
+right-to-left, so the first answer slot always holds the ones digit. Run the
+ordinary Transformer sanity check with:
+
+```bash
+python3 controlled_experiments/run_multiplication.py \
+  --task squaring --preset easy --steps 2000 \
+  --architecture full_token --full_token_layers 8
+```

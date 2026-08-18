@@ -203,7 +203,11 @@ def evaluate(model, loader: DataLoader, device: torch.device, example_count: int
             example = {
                 "a": batch["a"][row].item(),
                 "b": batch["b"][row].item(),
-                "expected": str(batch["a"][row].item() * batch["b"][row].item()),
+                "mathematical_answer": str(batch["a"][row].item() * batch["b"][row].item()),
+                "expected_tokens": "".join(
+                    str(token - 7)
+                    for token in batch["labels"][row, valid_tokens].tolist()
+                ),
                 "predicted": predicted,
             }
             (passed if is_correct else failed).append(example)
@@ -217,6 +221,7 @@ def evaluate(model, loader: DataLoader, device: torch.device, example_count: int
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--task", choices=("multiplication", "squaring"), default="multiplication")
     parser.add_argument("--preset", choices=("easy", "medium"), required=True)
     parser.add_argument("--steps", type=int, required=True)
     parser.add_argument("--batch_size", type=int, default=256)
@@ -235,13 +240,16 @@ def main() -> None:
 
     torch.manual_seed(args.seed)
     device = torch.device(args.device)
-    root = ROOT / "controlled_experiments" / "data" / f"multiplication_{args.preset}"
+    root = ROOT / "controlled_experiments" / "data" / f"{args.task}_{args.preset}"
     train = MultiplicationDataset(root / "train.jsonl")
+    datasets = {"train": train}
+    for split in ("test", "ood_long", "ood_one_long", "ood_both_long"):
+        path = root / f"{split}.jsonl"
+        if path.exists():
+            datasets[split] = MultiplicationDataset(path)
     loaders = {
-        "train": DataLoader(train, args.batch_size, collate_fn=collate),
-        "test": DataLoader(MultiplicationDataset(root / "test.jsonl"), args.batch_size, collate_fn=collate),
-        "ood_one_long": DataLoader(MultiplicationDataset(root / "ood_one_long.jsonl"), args.batch_size, collate_fn=collate),
-        "ood_both_long": DataLoader(MultiplicationDataset(root / "ood_both_long.jsonl"), args.batch_size, collate_fn=collate),
+        split: DataLoader(dataset, args.batch_size, collate_fn=collate)
+        for split, dataset in datasets.items()
     }
     train_loader = DataLoader(train, args.batch_size, shuffle=True, drop_last=True, collate_fn=collate)
     iterator = iter(train_loader)
@@ -250,7 +258,12 @@ def main() -> None:
     submission.NUM_SCRATCH_TOKENS = args.scratchpad_slots
     submission.NUM_RECURRENCES = args.recurrences
     submission.NUM_PROMPT_READER_LAYERS = args.prompt_reader_layers
-    model_spec = ModelSpec(17, 14, 500_000_000)
+    max_seq_len = max(
+        len(record["input_ids"])
+        for dataset in datasets.values()
+        for record in dataset.records
+    )
+    model_spec = ModelSpec(17, max_seq_len, 500_000_000)
     if args.architecture == "scratchpad":
         model = submission.build_model(model_spec)
     else:
@@ -277,6 +290,7 @@ def main() -> None:
             print(json.dumps({"step": step, "loss": loss.item(), "seconds": time.monotonic() - started}))
 
     summary = {
+        "task": args.task,
         "preset": args.preset,
         "architecture": args.architecture,
         "steps": args.steps,
@@ -295,7 +309,7 @@ def main() -> None:
         }
     )
     output = ROOT / "controlled_experiments" / "results" / (
-        f"multiply_{args.preset}_{args.architecture}_slots{args.scratchpad_slots}_r{args.recurrences}"
+        f"{args.task}_{args.preset}_{args.architecture}_slots{args.scratchpad_slots}_r{args.recurrences}"
         f"_reader{args.prompt_reader_layers}_s{args.steps}_seed{args.seed}.json"
     )
     output.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
