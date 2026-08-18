@@ -1,0 +1,1224 @@
+{
+  "architecture": "variable_recurrence_context_reinjection",
+  "batch_size": 256,
+  "eval_recurrences": [
+    1,
+    2,
+    3,
+    4,
+    6,
+    8
+  ],
+  "evaluation": {
+    "1": {
+      "ood_long": {
+        "digit_accuracy": 0.2423,
+        "exact_accuracy": 0.0,
+        "failed_examples": [
+          {
+            "a": 74018,
+            "b": 74018,
+            "expected_tokens": "4234668745",
+            "mathematical_answer": "5478664324",
+            "predicted": "4201459512"
+          },
+          {
+            "a": 37087,
+            "b": 37087,
+            "expected_tokens": "9655445731",
+            "mathematical_answer": "1375445569",
+            "predicted": "9600060007"
+          },
+          {
+            "a": 95003,
+            "b": 95003,
+            "expected_tokens": "9000755209",
+            "mathematical_answer": "9025570009",
+            "predicted": "0000511921"
+          },
+          {
+            "a": 37300,
+            "b": 37300,
+            "expected_tokens": "0000921931",
+            "mathematical_answer": "1391290000",
+            "predicted": "0000053100"
+          },
+          {
+            "a": 75785,
+            "b": 75785,
+            "expected_tokens": "5226633475",
+            "mathematical_answer": "5743366225",
+            "predicted": "5239533567"
+          }
+        ],
+        "passed_examples": []
+      },
+      "test": {
+        "digit_accuracy": 0.5518731988472623,
+        "exact_accuracy": 0.0028089887640449437,
+        "failed_examples": [
+          {
+            "a": 2504,
+            "b": 2504,
+            "expected_tokens": "61007260",
+            "mathematical_answer": "6270016",
+            "predicted": "61002560"
+          },
+          {
+            "a": 3220,
+            "b": 3220,
+            "expected_tokens": "00486301",
+            "mathematical_answer": "10368400",
+            "predicted": "00425101"
+          },
+          {
+            "a": 8885,
+            "b": 8885,
+            "expected_tokens": "52234987",
+            "mathematical_answer": "78943225",
+            "predicted": "52229537"
+          },
+          {
+            "a": 2877,
+            "b": 2877,
+            "expected_tokens": "92177280",
+            "mathematical_answer": "8277129",
+            "predicted": "92213180"
+          },
+          {
+            "a": 7814,
+            "b": 7814,
+            "expected_tokens": "69585016",
+            "mathematical_answer": "61058596",
+            "predicted": "65911566"
+          }
+        ],
+        "passed_examples": [
+          {
+            "a": 3800,
+            "b": 3800,
+            "expected_tokens": "00004441",
+            "mathematical_answer": "14440000",
+            "predicted": "00004441"
+          },
+          {
+            "a": 4952,
+            "b": 4952,
+            "expected_tokens": "40322542",
+            "mathematical_answer": "24522304",
+            "predicted": "40322542"
+          },
+          {
+            "a": 680,
+            "b": 680,
+            "expected_tokens": "004264",
+            "mathematical_answer": "462400",
+            "predicted": "004264"
+          },
+          {
+            "a": 5500,
+            "b": 5500,
+            "expected_tokens": "00005203",
+            "mathematical_answer": "30250000",
+            "predicted": "00005203"
+          },
+          {
+            "a": 2270,
+            "b": 2270,
+            "expected_tokens": "00925150",
+            "mathematical_answer": "5152900",
+            "predicted": "00925150"
+          }
+        ]
+      },
+      "train": {
+        "digit_accuracy": 0.561671469740634,
+        "exact_accuracy": 0.0033707865168539327,
+        "failed_examples": [
+          {
+            "a": 9117,
+            "b": 9117,
+            "expected_tokens": "98691138",
+            "mathematical_answer": "83119689",
+            "predicted": "98221238"
+          },
+          {
+            "a": 8220,
+            "b": 8220,
+            "expected_tokens": "00486576",
+            "mathematical_answer": "67568400",
+            "predicted": "00420476"
+          },
+          {
+            "a": 8034,
+            "b": 8034,
+            "expected_tokens": "65154546",
+            "mathematical_answer": "64545156",
+            "predicted": "65935046"
+          },
+          {
+            "a": 8643,
+            "b": 8643,
+            "expected_tokens": "94410747",
+            "mathematical_answer": "74701449",
+            "predicted": "94650057"
+          },
+          {
+            "a": 2643,
+            "b": 2643,
+            "expected_tokens": "94458960",
+            "mathematical_answer": "6985449",
+            "predicted": "94650060"
+          }
+        ],
+        "passed_examples": [
+          {
+            "a": 625,
+            "b": 625,
+            "expected_tokens": "526093",
+            "mathematical_answer": "390625",
+            "predicted": "526093"
+          },
+          {
+            "a": 1247,
+            "b": 1247,
+            "expected_tokens": "90055510",
+            "mathematical_answer": "1555009",
+            "predicted": "90055510"
+          },
+          {
+            "a": 6446,
+            "b": 6446,
+            "expected_tokens": "61905514",
+            "mathematical_answer": "41550916",
+            "predicted": "61905514"
+          },
+          {
+            "a": 642,
+            "b": 642,
+            "expected_tokens": "461214",
+            "mathematical_answer": "412164",
+            "predicted": "461214"
+          },
+          {
+            "a": 8720,
+            "b": 8720,
+            "expected_tokens": "00483067",
+            "mathematical_answer": "76038400",
+            "predicted": "00483067"
+          }
+        ]
+      }
+    },
+    "2": {
+      "ood_long": {
+        "digit_accuracy": 0.2764,
+        "exact_accuracy": 0.0,
+        "failed_examples": [
+          {
+            "a": 74018,
+            "b": 74018,
+            "expected_tokens": "4234668745",
+            "mathematical_answer": "5478664324",
+            "predicted": "4239749512"
+          },
+          {
+            "a": 37087,
+            "b": 37087,
+            "expected_tokens": "9655445731",
+            "mathematical_answer": "1375445569",
+            "predicted": "9699030017"
+          },
+          {
+            "a": 95003,
+            "b": 95003,
+            "expected_tokens": "9000755209",
+            "mathematical_answer": "9025570009",
+            "predicted": "0000101900"
+          },
+          {
+            "a": 37300,
+            "b": 37300,
+            "expected_tokens": "0000921931",
+            "mathematical_answer": "1391290000",
+            "predicted": "0000983110"
+          },
+          {
+            "a": 75785,
+            "b": 75785,
+            "expected_tokens": "5226633475",
+            "mathematical_answer": "5743366225",
+            "predicted": "5236437367"
+          }
+        ],
+        "passed_examples": []
+      },
+      "test": {
+        "digit_accuracy": 0.774135446685879,
+        "exact_accuracy": 0.05449438202247191,
+        "failed_examples": [
+          {
+            "a": 3220,
+            "b": 3220,
+            "expected_tokens": "00486301",
+            "mathematical_answer": "10368400",
+            "predicted": "00485301"
+          },
+          {
+            "a": 8885,
+            "b": 8885,
+            "expected_tokens": "52234987",
+            "mathematical_answer": "78943225",
+            "predicted": "52230987"
+          },
+          {
+            "a": 2877,
+            "b": 2877,
+            "expected_tokens": "92177280",
+            "mathematical_answer": "8277129",
+            "predicted": "92126280"
+          },
+          {
+            "a": 7814,
+            "b": 7814,
+            "expected_tokens": "69585016",
+            "mathematical_answer": "61058596",
+            "predicted": "69503016"
+          },
+          {
+            "a": 9967,
+            "b": 9967,
+            "expected_tokens": "98014399",
+            "mathematical_answer": "99341089",
+            "predicted": "98018399"
+          }
+        ],
+        "passed_examples": [
+          {
+            "a": 2504,
+            "b": 2504,
+            "expected_tokens": "61007260",
+            "mathematical_answer": "6270016",
+            "predicted": "61007260"
+          },
+          {
+            "a": 7371,
+            "b": 7371,
+            "expected_tokens": "14613345",
+            "mathematical_answer": "54331641",
+            "predicted": "14613345"
+          },
+          {
+            "a": 5695,
+            "b": 5695,
+            "expected_tokens": "52033423",
+            "mathematical_answer": "32433025",
+            "predicted": "52033423"
+          },
+          {
+            "a": 2511,
+            "b": 2511,
+            "expected_tokens": "12150360",
+            "mathematical_answer": "6305121",
+            "predicted": "12150360"
+          },
+          {
+            "a": 3786,
+            "b": 3786,
+            "expected_tokens": "69733341",
+            "mathematical_answer": "14333796",
+            "predicted": "69733341"
+          }
+        ]
+      },
+      "train": {
+        "digit_accuracy": 0.8144452449567723,
+        "exact_accuracy": 0.12162921348314606,
+        "failed_examples": [
+          {
+            "a": 9117,
+            "b": 9117,
+            "expected_tokens": "98691138",
+            "mathematical_answer": "83119689",
+            "predicted": "98633138"
+          },
+          {
+            "a": 8220,
+            "b": 8220,
+            "expected_tokens": "00486576",
+            "mathematical_answer": "67568400",
+            "predicted": "00483576"
+          },
+          {
+            "a": 8034,
+            "b": 8034,
+            "expected_tokens": "65154546",
+            "mathematical_answer": "64545156",
+            "predicted": "65138546"
+          },
+          {
+            "a": 8643,
+            "b": 8643,
+            "expected_tokens": "94410747",
+            "mathematical_answer": "74701449",
+            "predicted": "94438747"
+          },
+          {
+            "a": 2643,
+            "b": 2643,
+            "expected_tokens": "94458960",
+            "mathematical_answer": "6985449",
+            "predicted": "94438960"
+          }
+        ],
+        "passed_examples": [
+          {
+            "a": 700,
+            "b": 700,
+            "expected_tokens": "000094",
+            "mathematical_answer": "490000",
+            "predicted": "000094"
+          },
+          {
+            "a": 9900,
+            "b": 9900,
+            "expected_tokens": "00001089",
+            "mathematical_answer": "98010000",
+            "predicted": "00001089"
+          },
+          {
+            "a": 208,
+            "b": 208,
+            "expected_tokens": "462340",
+            "mathematical_answer": "43264",
+            "predicted": "462340"
+          },
+          {
+            "a": 6129,
+            "b": 6129,
+            "expected_tokens": "14646573",
+            "mathematical_answer": "37564641",
+            "predicted": "14646573"
+          },
+          {
+            "a": 1155,
+            "b": 1155,
+            "expected_tokens": "52043310",
+            "mathematical_answer": "1334025",
+            "predicted": "52043310"
+          }
+        ]
+      }
+    },
+    "3": {
+      "ood_long": {
+        "digit_accuracy": 0.2755,
+        "exact_accuracy": 0.0,
+        "failed_examples": [
+          {
+            "a": 74018,
+            "b": 74018,
+            "expected_tokens": "4234668745",
+            "mathematical_answer": "5478664324",
+            "predicted": "4278746512"
+          },
+          {
+            "a": 37087,
+            "b": 37087,
+            "expected_tokens": "9655445731",
+            "mathematical_answer": "1375445569",
+            "predicted": "9291930117"
+          },
+          {
+            "a": 95003,
+            "b": 95003,
+            "expected_tokens": "9000755209",
+            "mathematical_answer": "9025570009",
+            "predicted": "0000201908"
+          },
+          {
+            "a": 37300,
+            "b": 37300,
+            "expected_tokens": "0000921931",
+            "mathematical_answer": "1391290000",
+            "predicted": "0000983110"
+          },
+          {
+            "a": 75785,
+            "b": 75785,
+            "expected_tokens": "5226633475",
+            "mathematical_answer": "5743366225",
+            "predicted": "5236437367"
+          }
+        ],
+        "passed_examples": []
+      },
+      "test": {
+        "digit_accuracy": 0.7773054755043227,
+        "exact_accuracy": 0.058426966292134834,
+        "failed_examples": [
+          {
+            "a": 3220,
+            "b": 3220,
+            "expected_tokens": "00486301",
+            "mathematical_answer": "10368400",
+            "predicted": "00489301"
+          },
+          {
+            "a": 8885,
+            "b": 8885,
+            "expected_tokens": "52234987",
+            "mathematical_answer": "78943225",
+            "predicted": "52230987"
+          },
+          {
+            "a": 2877,
+            "b": 2877,
+            "expected_tokens": "92177280",
+            "mathematical_answer": "8277129",
+            "predicted": "92128280"
+          },
+          {
+            "a": 7814,
+            "b": 7814,
+            "expected_tokens": "69585016",
+            "mathematical_answer": "61058596",
+            "predicted": "69523016"
+          },
+          {
+            "a": 9967,
+            "b": 9967,
+            "expected_tokens": "98014399",
+            "mathematical_answer": "99341089",
+            "predicted": "98012399"
+          }
+        ],
+        "passed_examples": [
+          {
+            "a": 2504,
+            "b": 2504,
+            "expected_tokens": "61007260",
+            "mathematical_answer": "6270016",
+            "predicted": "61007260"
+          },
+          {
+            "a": 1755,
+            "b": 1755,
+            "expected_tokens": "52008030",
+            "mathematical_answer": "3080025",
+            "predicted": "52008030"
+          },
+          {
+            "a": 5695,
+            "b": 5695,
+            "expected_tokens": "52033423",
+            "mathematical_answer": "32433025",
+            "predicted": "52033423"
+          },
+          {
+            "a": 2511,
+            "b": 2511,
+            "expected_tokens": "12150360",
+            "mathematical_answer": "6305121",
+            "predicted": "12150360"
+          },
+          {
+            "a": 3800,
+            "b": 3800,
+            "expected_tokens": "00004441",
+            "mathematical_answer": "14440000",
+            "predicted": "00004441"
+          }
+        ]
+      },
+      "train": {
+        "digit_accuracy": 0.81882204610951,
+        "exact_accuracy": 0.136938202247191,
+        "failed_examples": [
+          {
+            "a": 9117,
+            "b": 9117,
+            "expected_tokens": "98691138",
+            "mathematical_answer": "83119689",
+            "predicted": "98633138"
+          },
+          {
+            "a": 8220,
+            "b": 8220,
+            "expected_tokens": "00486576",
+            "mathematical_answer": "67568400",
+            "predicted": "00483576"
+          },
+          {
+            "a": 8034,
+            "b": 8034,
+            "expected_tokens": "65154546",
+            "mathematical_answer": "64545156",
+            "predicted": "65132546"
+          },
+          {
+            "a": 8643,
+            "b": 8643,
+            "expected_tokens": "94410747",
+            "mathematical_answer": "74701449",
+            "predicted": "94439747"
+          },
+          {
+            "a": 2643,
+            "b": 2643,
+            "expected_tokens": "94458960",
+            "mathematical_answer": "6985449",
+            "predicted": "94439960"
+          }
+        ],
+        "passed_examples": [
+          {
+            "a": 3105,
+            "b": 3105,
+            "expected_tokens": "52014690",
+            "mathematical_answer": "9641025",
+            "predicted": "52014690"
+          },
+          {
+            "a": 5510,
+            "b": 5510,
+            "expected_tokens": "00106303",
+            "mathematical_answer": "30360100",
+            "predicted": "00106303"
+          },
+          {
+            "a": 5595,
+            "b": 5595,
+            "expected_tokens": "52040313",
+            "mathematical_answer": "31304025",
+            "predicted": "52040313"
+          },
+          {
+            "a": 5104,
+            "b": 5104,
+            "expected_tokens": "61805062",
+            "mathematical_answer": "26050816",
+            "predicted": "61805062"
+          },
+          {
+            "a": 700,
+            "b": 700,
+            "expected_tokens": "000094",
+            "mathematical_answer": "490000",
+            "predicted": "000094"
+          }
+        ]
+      }
+    },
+    "4": {
+      "ood_long": {
+        "digit_accuracy": 0.2726,
+        "exact_accuracy": 0.0,
+        "failed_examples": [
+          {
+            "a": 74018,
+            "b": 74018,
+            "expected_tokens": "4234668745",
+            "mathematical_answer": "5478664324",
+            "predicted": "4278746512"
+          },
+          {
+            "a": 37087,
+            "b": 37087,
+            "expected_tokens": "9655445731",
+            "mathematical_answer": "1375445569",
+            "predicted": "9291930117"
+          },
+          {
+            "a": 95003,
+            "b": 95003,
+            "expected_tokens": "9000755209",
+            "mathematical_answer": "9025570009",
+            "predicted": "0000201908"
+          },
+          {
+            "a": 37300,
+            "b": 37300,
+            "expected_tokens": "0000921931",
+            "mathematical_answer": "1391290000",
+            "predicted": "0000983110"
+          },
+          {
+            "a": 75785,
+            "b": 75785,
+            "expected_tokens": "5226633475",
+            "mathematical_answer": "5743366225",
+            "predicted": "5236437367"
+          }
+        ],
+        "passed_examples": []
+      },
+      "test": {
+        "digit_accuracy": 0.7754322766570605,
+        "exact_accuracy": 0.0550561797752809,
+        "failed_examples": [
+          {
+            "a": 3220,
+            "b": 3220,
+            "expected_tokens": "00486301",
+            "mathematical_answer": "10368400",
+            "predicted": "00483301"
+          },
+          {
+            "a": 8885,
+            "b": 8885,
+            "expected_tokens": "52234987",
+            "mathematical_answer": "78943225",
+            "predicted": "52230987"
+          },
+          {
+            "a": 2877,
+            "b": 2877,
+            "expected_tokens": "92177280",
+            "mathematical_answer": "8277129",
+            "predicted": "92128280"
+          },
+          {
+            "a": 7814,
+            "b": 7814,
+            "expected_tokens": "69585016",
+            "mathematical_answer": "61058596",
+            "predicted": "69523016"
+          },
+          {
+            "a": 9967,
+            "b": 9967,
+            "expected_tokens": "98014399",
+            "mathematical_answer": "99341089",
+            "predicted": "98012399"
+          }
+        ],
+        "passed_examples": [
+          {
+            "a": 2504,
+            "b": 2504,
+            "expected_tokens": "61007260",
+            "mathematical_answer": "6270016",
+            "predicted": "61007260"
+          },
+          {
+            "a": 1755,
+            "b": 1755,
+            "expected_tokens": "52008030",
+            "mathematical_answer": "3080025",
+            "predicted": "52008030"
+          },
+          {
+            "a": 4725,
+            "b": 4725,
+            "expected_tokens": "52652322",
+            "mathematical_answer": "22325625",
+            "predicted": "52652322"
+          },
+          {
+            "a": 5695,
+            "b": 5695,
+            "expected_tokens": "52033423",
+            "mathematical_answer": "32433025",
+            "predicted": "52033423"
+          },
+          {
+            "a": 2511,
+            "b": 2511,
+            "expected_tokens": "12150360",
+            "mathematical_answer": "6305121",
+            "predicted": "12150360"
+          }
+        ]
+      },
+      "train": {
+        "digit_accuracy": 0.8169308357348704,
+        "exact_accuracy": 0.1351123595505618,
+        "failed_examples": [
+          {
+            "a": 9117,
+            "b": 9117,
+            "expected_tokens": "98691138",
+            "mathematical_answer": "83119689",
+            "predicted": "98639138"
+          },
+          {
+            "a": 8220,
+            "b": 8220,
+            "expected_tokens": "00486576",
+            "mathematical_answer": "67568400",
+            "predicted": "00483576"
+          },
+          {
+            "a": 8034,
+            "b": 8034,
+            "expected_tokens": "65154546",
+            "mathematical_answer": "64545156",
+            "predicted": "65132646"
+          },
+          {
+            "a": 8643,
+            "b": 8643,
+            "expected_tokens": "94410747",
+            "mathematical_answer": "74701449",
+            "predicted": "94499747"
+          },
+          {
+            "a": 2643,
+            "b": 2643,
+            "expected_tokens": "94458960",
+            "mathematical_answer": "6985449",
+            "predicted": "94439960"
+          }
+        ],
+        "passed_examples": [
+          {
+            "a": 3105,
+            "b": 3105,
+            "expected_tokens": "52014690",
+            "mathematical_answer": "9641025",
+            "predicted": "52014690"
+          },
+          {
+            "a": 4700,
+            "b": 4700,
+            "expected_tokens": "00009022",
+            "mathematical_answer": "22090000",
+            "predicted": "00009022"
+          },
+          {
+            "a": 5510,
+            "b": 5510,
+            "expected_tokens": "00106303",
+            "mathematical_answer": "30360100",
+            "predicted": "00106303"
+          },
+          {
+            "a": 5595,
+            "b": 5595,
+            "expected_tokens": "52040313",
+            "mathematical_answer": "31304025",
+            "predicted": "52040313"
+          },
+          {
+            "a": 5104,
+            "b": 5104,
+            "expected_tokens": "61805062",
+            "mathematical_answer": "26050816",
+            "predicted": "61805062"
+          }
+        ]
+      }
+    },
+    "6": {
+      "ood_long": {
+        "digit_accuracy": 0.2662,
+        "exact_accuracy": 0.0,
+        "failed_examples": [
+          {
+            "a": 74018,
+            "b": 74018,
+            "expected_tokens": "4234668745",
+            "mathematical_answer": "5478664324",
+            "predicted": "4278746512"
+          },
+          {
+            "a": 37087,
+            "b": 37087,
+            "expected_tokens": "9655445731",
+            "mathematical_answer": "1375445569",
+            "predicted": "9291920137"
+          },
+          {
+            "a": 95003,
+            "b": 95003,
+            "expected_tokens": "9000755209",
+            "mathematical_answer": "9025570009",
+            "predicted": "0000201908"
+          },
+          {
+            "a": 37300,
+            "b": 37300,
+            "expected_tokens": "0000921931",
+            "mathematical_answer": "1391290000",
+            "predicted": "0000983110"
+          },
+          {
+            "a": 75785,
+            "b": 75785,
+            "expected_tokens": "5226633475",
+            "mathematical_answer": "5743366225",
+            "predicted": "5212437267"
+          }
+        ],
+        "passed_examples": []
+      },
+      "test": {
+        "digit_accuracy": 0.7701008645533142,
+        "exact_accuracy": 0.05112359550561798,
+        "failed_examples": [
+          {
+            "a": 3220,
+            "b": 3220,
+            "expected_tokens": "00486301",
+            "mathematical_answer": "10368400",
+            "predicted": "00483301"
+          },
+          {
+            "a": 8885,
+            "b": 8885,
+            "expected_tokens": "52234987",
+            "mathematical_answer": "78943225",
+            "predicted": "52232987"
+          },
+          {
+            "a": 2877,
+            "b": 2877,
+            "expected_tokens": "92177280",
+            "mathematical_answer": "8277129",
+            "predicted": "92120380"
+          },
+          {
+            "a": 7814,
+            "b": 7814,
+            "expected_tokens": "69585016",
+            "mathematical_answer": "61058596",
+            "predicted": "69523016"
+          },
+          {
+            "a": 9967,
+            "b": 9967,
+            "expected_tokens": "98014399",
+            "mathematical_answer": "99341089",
+            "predicted": "98012399"
+          }
+        ],
+        "passed_examples": [
+          {
+            "a": 2504,
+            "b": 2504,
+            "expected_tokens": "61007260",
+            "mathematical_answer": "6270016",
+            "predicted": "61007260"
+          },
+          {
+            "a": 6000,
+            "b": 6000,
+            "expected_tokens": "00000063",
+            "mathematical_answer": "36000000",
+            "predicted": "00000063"
+          },
+          {
+            "a": 1755,
+            "b": 1755,
+            "expected_tokens": "52008030",
+            "mathematical_answer": "3080025",
+            "predicted": "52008030"
+          },
+          {
+            "a": 4725,
+            "b": 4725,
+            "expected_tokens": "52652322",
+            "mathematical_answer": "22325625",
+            "predicted": "52652322"
+          },
+          {
+            "a": 3800,
+            "b": 3800,
+            "expected_tokens": "00004441",
+            "mathematical_answer": "14440000",
+            "predicted": "00004441"
+          }
+        ]
+      },
+      "train": {
+        "digit_accuracy": 0.8100684438040345,
+        "exact_accuracy": 0.1223314606741573,
+        "failed_examples": [
+          {
+            "a": 9117,
+            "b": 9117,
+            "expected_tokens": "98691138",
+            "mathematical_answer": "83119689",
+            "predicted": "98639148"
+          },
+          {
+            "a": 8220,
+            "b": 8220,
+            "expected_tokens": "00486576",
+            "mathematical_answer": "67568400",
+            "predicted": "00483576"
+          },
+          {
+            "a": 8034,
+            "b": 8034,
+            "expected_tokens": "65154546",
+            "mathematical_answer": "64545156",
+            "predicted": "65132646"
+          },
+          {
+            "a": 8643,
+            "b": 8643,
+            "expected_tokens": "94410747",
+            "mathematical_answer": "74701449",
+            "predicted": "94499747"
+          },
+          {
+            "a": 2643,
+            "b": 2643,
+            "expected_tokens": "94458960",
+            "mathematical_answer": "6985449",
+            "predicted": "94439960"
+          }
+        ],
+        "passed_examples": [
+          {
+            "a": 3105,
+            "b": 3105,
+            "expected_tokens": "52014690",
+            "mathematical_answer": "9641025",
+            "predicted": "52014690"
+          },
+          {
+            "a": 4700,
+            "b": 4700,
+            "expected_tokens": "00009022",
+            "mathematical_answer": "22090000",
+            "predicted": "00009022"
+          },
+          {
+            "a": 5510,
+            "b": 5510,
+            "expected_tokens": "00106303",
+            "mathematical_answer": "30360100",
+            "predicted": "00106303"
+          },
+          {
+            "a": 5595,
+            "b": 5595,
+            "expected_tokens": "52040313",
+            "mathematical_answer": "31304025",
+            "predicted": "52040313"
+          },
+          {
+            "a": 5033,
+            "b": 5033,
+            "expected_tokens": "98013352",
+            "mathematical_answer": "25331089",
+            "predicted": "98013352"
+          }
+        ]
+      }
+    },
+    "8": {
+      "ood_long": {
+        "digit_accuracy": 0.2613,
+        "exact_accuracy": 0.0,
+        "failed_examples": [
+          {
+            "a": 74018,
+            "b": 74018,
+            "expected_tokens": "4234668745",
+            "mathematical_answer": "5478664324",
+            "predicted": "4278746516"
+          },
+          {
+            "a": 37087,
+            "b": 37087,
+            "expected_tokens": "9655445731",
+            "mathematical_answer": "1375445569",
+            "predicted": "9290020147"
+          },
+          {
+            "a": 95003,
+            "b": 95003,
+            "expected_tokens": "9000755209",
+            "mathematical_answer": "9025570009",
+            "predicted": "0000201908"
+          },
+          {
+            "a": 37300,
+            "b": 37300,
+            "expected_tokens": "0000921931",
+            "mathematical_answer": "1391290000",
+            "predicted": "0000983118"
+          },
+          {
+            "a": 75785,
+            "b": 75785,
+            "expected_tokens": "5226633475",
+            "mathematical_answer": "5743366225",
+            "predicted": "5212437267"
+          }
+        ],
+        "passed_examples": []
+      },
+      "test": {
+        "digit_accuracy": 0.764121037463977,
+        "exact_accuracy": 0.051685393258426963,
+        "failed_examples": [
+          {
+            "a": 3220,
+            "b": 3220,
+            "expected_tokens": "00486301",
+            "mathematical_answer": "10368400",
+            "predicted": "00489301"
+          },
+          {
+            "a": 8885,
+            "b": 8885,
+            "expected_tokens": "52234987",
+            "mathematical_answer": "78943225",
+            "predicted": "52232987"
+          },
+          {
+            "a": 2877,
+            "b": 2877,
+            "expected_tokens": "92177280",
+            "mathematical_answer": "8277129",
+            "predicted": "92121380"
+          },
+          {
+            "a": 7814,
+            "b": 7814,
+            "expected_tokens": "69585016",
+            "mathematical_answer": "61058596",
+            "predicted": "69522016"
+          },
+          {
+            "a": 9967,
+            "b": 9967,
+            "expected_tokens": "98014399",
+            "mathematical_answer": "99341089",
+            "predicted": "98012499"
+          }
+        ],
+        "passed_examples": [
+          {
+            "a": 2504,
+            "b": 2504,
+            "expected_tokens": "61007260",
+            "mathematical_answer": "6270016",
+            "predicted": "61007260"
+          },
+          {
+            "a": 6000,
+            "b": 6000,
+            "expected_tokens": "00000063",
+            "mathematical_answer": "36000000",
+            "predicted": "00000063"
+          },
+          {
+            "a": 1755,
+            "b": 1755,
+            "expected_tokens": "52008030",
+            "mathematical_answer": "3080025",
+            "predicted": "52008030"
+          },
+          {
+            "a": 4725,
+            "b": 4725,
+            "expected_tokens": "52652322",
+            "mathematical_answer": "22325625",
+            "predicted": "52652322"
+          },
+          {
+            "a": 3800,
+            "b": 3800,
+            "expected_tokens": "00004441",
+            "mathematical_answer": "14440000",
+            "predicted": "00004441"
+          }
+        ]
+      },
+      "train": {
+        "digit_accuracy": 0.8009365994236312,
+        "exact_accuracy": 0.11067415730337078,
+        "failed_examples": [
+          {
+            "a": 9117,
+            "b": 9117,
+            "expected_tokens": "98691138",
+            "mathematical_answer": "83119689",
+            "predicted": "98639148"
+          },
+          {
+            "a": 8220,
+            "b": 8220,
+            "expected_tokens": "00486576",
+            "mathematical_answer": "67568400",
+            "predicted": "00483576"
+          },
+          {
+            "a": 8034,
+            "b": 8034,
+            "expected_tokens": "65154546",
+            "mathematical_answer": "64545156",
+            "predicted": "65192646"
+          },
+          {
+            "a": 8643,
+            "b": 8643,
+            "expected_tokens": "94410747",
+            "mathematical_answer": "74701449",
+            "predicted": "94499847"
+          },
+          {
+            "a": 2643,
+            "b": 2643,
+            "expected_tokens": "94458960",
+            "mathematical_answer": "6985449",
+            "predicted": "94439960"
+          }
+        ],
+        "passed_examples": [
+          {
+            "a": 3105,
+            "b": 3105,
+            "expected_tokens": "52014690",
+            "mathematical_answer": "9641025",
+            "predicted": "52014690"
+          },
+          {
+            "a": 4700,
+            "b": 4700,
+            "expected_tokens": "00009022",
+            "mathematical_answer": "22090000",
+            "predicted": "00009022"
+          },
+          {
+            "a": 5510,
+            "b": 5510,
+            "expected_tokens": "00106303",
+            "mathematical_answer": "30360100",
+            "predicted": "00106303"
+          },
+          {
+            "a": 5595,
+            "b": 5595,
+            "expected_tokens": "52040313",
+            "mathematical_answer": "31304025",
+            "predicted": "52040313"
+          },
+          {
+            "a": 5033,
+            "b": 5033,
+            "expected_tokens": "98013352",
+            "mathematical_answer": "25331089",
+            "predicted": "98013352"
+          }
+        ]
+      }
+    }
+  },
+  "layers_per_macro_step": 4,
+  "lr": 0.002,
+  "parameter_count": 3161600,
+  "preset": "easy",
+  "steps": 2000,
+  "task": "squaring",
+  "train_recurrences": [
+    2,
+    4
+  ]
+}

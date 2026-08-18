@@ -1,0 +1,191 @@
+{
+  "architecture": "full_token",
+  "batch_size": 256,
+  "full_token_layers": 8,
+  "lr": 0.002,
+  "ood_both_long": {
+    "digit_accuracy": 0.13467397928092625,
+    "exact_accuracy": 0.0,
+    "failed_examples": [
+      {
+        "a": 29128,
+        "b": 36497,
+        "expected": "1063084616",
+        "predicted": "2155049691"
+      },
+      {
+        "a": 90964,
+        "b": 45435,
+        "expected": "4132949340",
+        "predicted": "5935490992"
+      },
+      {
+        "a": 74287,
+        "b": 81780,
+        "expected": "6075190860",
+        "predicted": "5133955365"
+      },
+      {
+        "a": 17546,
+        "b": 87836,
+        "expected": "1541170456",
+        "predicted": "1172554288"
+      },
+      {
+        "a": 95213,
+        "b": 19786,
+        "expected": "1883884418",
+        "predicted": "3070571886"
+      }
+    ],
+    "passed_examples": []
+  },
+  "ood_one_long": {
+    "digit_accuracy": 0.24046076313894887,
+    "exact_accuracy": 0.0,
+    "failed_examples": [
+      {
+        "a": 30528,
+        "b": 1901,
+        "expected": "58033728",
+        "predicted": "49144488"
+      },
+      {
+        "a": 60989,
+        "b": 4507,
+        "expected": "274877423",
+        "predicted": "189350023"
+      },
+      {
+        "a": 48658,
+        "b": 9780,
+        "expected": "475875240",
+        "predicted": "481030440"
+      },
+      {
+        "a": 66037,
+        "b": 953,
+        "expected": "62933261",
+        "predicted": "43331921"
+      },
+      {
+        "a": 32049,
+        "b": 463,
+        "expected": "14838687",
+        "predicted": "29312047"
+      }
+    ],
+    "passed_examples": []
+  },
+  "parameter_count": 6318592,
+  "preset": "easy",
+  "prompt_reader_layers": 0,
+  "recurrences": 4,
+  "scratchpad_slots": 4,
+  "steps": 2000,
+  "test": {
+    "digit_accuracy": 0.3774343970010058,
+    "exact_accuracy": 0.0,
+    "failed_examples": [
+      {
+        "a": 3640,
+        "b": 748,
+        "expected": "2722720",
+        "predicted": "2579020"
+      },
+      {
+        "a": 966,
+        "b": 906,
+        "expected": "875196",
+        "predicted": "877536"
+      },
+      {
+        "a": 7613,
+        "b": 927,
+        "expected": "7057251",
+        "predicted": "7001171"
+      },
+      {
+        "a": 3493,
+        "b": 667,
+        "expected": "2329831",
+        "predicted": "2129291"
+      },
+      {
+        "a": 809,
+        "b": 946,
+        "expected": "765314",
+        "predicted": "763334"
+      }
+    ],
+    "passed_examples": []
+  },
+  "train": {
+    "digit_accuracy": 0.5031131254864258,
+    "exact_accuracy": 0.0046875,
+    "failed_examples": [
+      {
+        "a": 8337,
+        "b": 798,
+        "expected": "6652926",
+        "predicted": "6409746"
+      },
+      {
+        "a": 6824,
+        "b": 510,
+        "expected": "3480240",
+        "predicted": "3458840"
+      },
+      {
+        "a": 350,
+        "b": 6626,
+        "expected": "2319100",
+        "predicted": "2110040"
+      },
+      {
+        "a": 688,
+        "b": 334,
+        "expected": "229792",
+        "predicted": "215412"
+      },
+      {
+        "a": 101,
+        "b": 797,
+        "expected": "80497",
+        "predicted": "85257"
+      }
+    ],
+    "passed_examples": [
+      {
+        "a": 196,
+        "b": 6480,
+        "expected": "1270080",
+        "predicted": "1270080"
+      },
+      {
+        "a": 231,
+        "b": 9482,
+        "expected": "2190342",
+        "predicted": "2190342"
+      },
+      {
+        "a": 2014,
+        "b": 766,
+        "expected": "1542724",
+        "predicted": "1542724"
+      },
+      {
+        "a": 205,
+        "b": 103,
+        "expected": "21115",
+        "predicted": "21115"
+      },
+      {
+        "a": 836,
+        "b": 1328,
+        "expected": "1110208",
+        "predicted": "1110208"
+      }
+    ]
+  }
+}
