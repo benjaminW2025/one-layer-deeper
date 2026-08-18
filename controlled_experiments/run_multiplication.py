@@ -135,10 +135,24 @@ class FullTokenBlock(torch.nn.Module):
 class FullTokenTransformer(torch.nn.Module):
     """A conventional bidirectional Transformer for the learnability check."""
 
-    def __init__(self, source, spec: ModelSpec, layers: int, rounds: int = 1) -> None:
+    def __init__(
+        self,
+        source,
+        spec: ModelSpec,
+        layers: int,
+        rounds: int = 1,
+        use_round_embeddings: bool = False,
+    ) -> None:
         super().__init__()
         self.source = source
         self.rounds = rounds
+        self.round_embeddings = (
+            torch.nn.Parameter(torch.empty(rounds, source.D_MODEL))
+            if use_round_embeddings
+            else None
+        )
+        if self.round_embeddings is not None:
+            torch.nn.init.normal_(self.round_embeddings, std=0.02)
         self.config = source.Config(spec.vocab_size, spec.max_seq_len)
         self.token_embedding = torch.nn.Embedding(spec.vocab_size, source.D_MODEL)
         self.blocks = torch.nn.ModuleList(
@@ -159,7 +173,9 @@ class FullTokenTransformer(torch.nn.Module):
             context.device,
             context.dtype,
         )
-        for _ in range(self.rounds):
+        for round_index in range(self.rounds):
+            if self.round_embeddings is not None:
+                context = context + self.round_embeddings[round_index]
             for block in self.blocks:
                 context = block(context, attention_mask, rope)
         return self.head(self.final_norm(context)), None
@@ -234,6 +250,7 @@ def main() -> None:
         default="scratchpad",
     )
     parser.add_argument("--full_token_layers", type=int, default=8)
+    parser.add_argument("--round_embeddings", action="store_true")
     parser.add_argument("--scratchpad_slots", type=int, default=4)
     parser.add_argument("--recurrences", type=int, default=4)
     parser.add_argument("--prompt_reader_layers", type=int, choices=(0, 1), default=0)
@@ -275,7 +292,11 @@ def main() -> None:
     else:
         rounds = args.recurrences if args.architecture == "full_token_recurrent" else 1
         model = FullTokenTransformer(
-            submission, model_spec, args.full_token_layers, rounds
+            submission,
+            model_spec,
+            args.full_token_layers,
+            rounds,
+            args.round_embeddings,
         )
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.95), weight_decay=0.1)
@@ -309,6 +330,7 @@ def main() -> None:
         "recurrences": args.recurrences,
         "prompt_reader_layers": args.prompt_reader_layers,
         "full_token_layers": args.full_token_layers,
+        "round_embeddings": args.round_embeddings,
         "parameter_count": sum(parameter.numel() for parameter in model.parameters()),
     }
     summary.update(
@@ -319,7 +341,8 @@ def main() -> None:
     )
     output = ROOT / "controlled_experiments" / "results" / (
         f"{args.task}_{args.preset}_{args.architecture}_slots{args.scratchpad_slots}_r{args.recurrences}"
-        f"_reader{args.prompt_reader_layers}_s{args.steps}_seed{args.seed}.json"
+        f"_reader{args.prompt_reader_layers}_clock{int(args.round_embeddings)}"
+        f"_s{args.steps}_seed{args.seed}.json"
     )
     output.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(summary, indent=2, sort_keys=True))

@@ -167,6 +167,16 @@ python3 controlled_experiments/run_multiplication.py \
   --architecture full_token_recurrent --full_token_layers 2 --recurrences 4
 ```
 
+To test whether the shared blocks need to know the current computation round,
+add four learned round embeddings:
+
+```bash
+python3 controlled_experiments/run_multiplication.py \
+  --task squaring --preset easy --steps 2000 \
+  --architecture full_token_recurrent --full_token_layers 2 --recurrences 4 \
+  --round_embeddings
+```
+
 ## Direct squaring with answer slots
 
 Generate explicit-output squaring data with:
