@@ -263,3 +263,17 @@ python3 controlled_experiments/profile_optimization.py \
 For the 8-layer reference, use `--architecture full_token --layers 8`. Compare
 the per-block update scales and the recurrent gradient-alignment records, not
 just final accuracy.
+
+Render an optimization trace without installing plotting libraries:
+
+```bash
+python3 controlled_experiments/visualize_profile.py \
+  controlled_experiments/results/profile_squaring_easy_recurrent_l4_r2_s2000_seed74.jsonl
+```
+
+This writes a self-contained HTML dashboard beside the profile. To view all
+completed experiment results in one heatmapped comparison table, run:
+
+```bash
+python3 controlled_experiments/visualize_results.py
+```

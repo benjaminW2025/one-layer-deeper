@@ -176,6 +176,7 @@ def main() -> None:
     parser.add_argument("--probe_horizons", type=parse_positive_csv, default=parse_positive_csv("1,2"))
     parser.add_argument("--round_embeddings", action="store_true")
     parser.add_argument("--example_count", type=int, default=5)
+    parser.add_argument("--skip_final_evaluation", action="store_true")
     parser.add_argument("--seed", type=int, default=74)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
@@ -315,14 +316,12 @@ def main() -> None:
     for handle in handles:
         handle.remove()
 
-    summary = {
-        "kind": "final_evaluation",
-        "seconds": time.monotonic() - started,
-        "splits": {
+    summary = {"kind": "final_evaluation", "seconds": time.monotonic() - started}
+    if not args.skip_final_evaluation:
+        summary["splits"] = {
             split: evaluate(model, loader, device, args.example_count)
             for split, loader in loaders.items()
-        },
-    }
+        }
     with output.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(summary) + "\n")
     print(json.dumps(summary, indent=2, sort_keys=True))
