@@ -53,6 +53,8 @@ def collate(records: list[dict[str, object]]) -> dict[str, Tensor]:
     z_digits = torch.full((batch,), -1, dtype=torch.long)
     modulus_digits = torch.full((batch,), -1, dtype=torch.long)
     quotient_digits = torch.full((batch,), -1, dtype=torch.long)
+    x_values = torch.full((batch,), -1, dtype=torch.long)
+    x_digits = torch.full((batch,), -1, dtype=torch.long)
     for row, record in enumerate(records):
         inputs = torch.tensor(record["input_ids"], dtype=torch.long)
         targets = torch.tensor(record["labels"], dtype=torch.long)
@@ -62,8 +64,11 @@ def collate(records: list[dict[str, object]]) -> dict[str, Tensor]:
         positions[row, : targets.numel()] = torch.arange(
             inputs.numel() - targets.numel(), inputs.numel()
         )
-        a_values[row] = int(record["a"])
-        b_values[row] = int(record["b"])
+        a_values[row] = int(record.get("a", -1))
+        b_values[row] = int(record.get("b", -1))
+        if "x" in record:
+            x_values[row] = int(record["x"])
+            x_digits[row] = int(record["x_digits"])
         if "z" in record:
             z_values[row] = int(record["z"])
             modulus_values[row] = int(record["modulus"])
@@ -84,6 +89,8 @@ def collate(records: list[dict[str, object]]) -> dict[str, Tensor]:
         "z_digits": z_digits,
         "modulus_digits": modulus_digits,
         "quotient_digits": quotient_digits,
+        "x": x_values,
+        "x_digits": x_digits,
     }
 
 
@@ -276,6 +283,7 @@ def evaluate(
     quotient_digit_buckets: dict[int, list[int]] = {}
     z_digit_buckets: dict[int, list[int]] = {}
     modulus_digit_buckets: dict[int, list[int]] = {}
+    x_digit_buckets: dict[int, list[int]] = {}
     context = torch.autocast("cuda", dtype=torch.bfloat16) if device.type == "cuda" else nullcontext()
     for host_batch in loader:
         batch = {name: value.to(device) for name, value in host_batch.items()}
@@ -300,7 +308,7 @@ def evaluate(
                 right = position_right.setdefault(from_right, [0, 0])
                 right[0] += int(correct)
                 right[1] += 1
-            if task == "reduction":
+            if task in ("reduction", "square_mod"):
                 exact_value = int(is_correct)
                 _bucket_metrics(
                     quotient_digit_buckets,
@@ -323,6 +331,14 @@ def evaluate(
                     row_digit_correct,
                     row_digit_count,
                 )
+                if task == "square_mod":
+                    _bucket_metrics(
+                        x_digit_buckets,
+                        int(batch["x_digits"][row].item()),
+                        exact_value,
+                        row_digit_correct,
+                        row_digit_count,
+                    )
             if len(passed if is_correct else failed) >= example_count:
                 continue
             valid_tokens = row_valid
@@ -338,6 +354,14 @@ def evaluate(
                 }
                 mathematical_answer = str(
                     batch["z"][row].item() % batch["modulus"][row].item()
+                )
+            elif task == "square_mod":
+                example_inputs = {
+                    "x": batch["x"][row].item(),
+                    "modulus": batch["modulus"][row].item(),
+                }
+                mathematical_answer = str(
+                    pow(batch["x"][row].item(), 2, batch["modulus"][row].item())
                 )
             else:
                 example_inputs = {
@@ -379,6 +403,15 @@ def evaluate(
                 "accuracy_by_modulus_digits": _finish_buckets(modulus_digit_buckets),
             }
         )
+    elif task == "square_mod":
+        result.update(
+            {
+                "accuracy_by_quotient_digits": _finish_buckets(quotient_digit_buckets),
+                "accuracy_by_square_digits": _finish_buckets(z_digit_buckets),
+                "accuracy_by_modulus_digits": _finish_buckets(modulus_digit_buckets),
+                "accuracy_by_x_digits": _finish_buckets(x_digit_buckets),
+            }
+        )
     return result
 
 
@@ -386,7 +419,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--task",
-        choices=("multiplication", "squaring", "reduction"),
+        choices=("multiplication", "squaring", "reduction", "square_mod"),
         default="multiplication",
     )
     parser.add_argument("--preset", choices=("easy", "medium"), required=True)
@@ -423,6 +456,7 @@ def main() -> None:
     datasets = {"train": train}
     for split in (
         "test",
+        "test_seen_n",
         "ood_long",
         "ood_one_long",
         "ood_z_long",

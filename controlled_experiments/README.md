@@ -115,6 +115,27 @@ numerator digits, modulus digits, and output position counted from both ends.
 Compare learning at matched update counts; treat elapsed time as a separate
 compute-efficiency measurement.
 
+Generate the one-step modular-squaring dataset with:
+
+```bash
+python3 controlled_experiments/generate_square_mod.py --preset easy
+```
+
+This task is `x, N -> x^2 mod N`, one transition of the competition problem.
+`test_seen_n` uses held-out `x` values with training moduli, `test` uses unseen
+semiprime moduli with the same decimal widths, and `ood_n_long` uses wider
+unseen moduli. Run the current R4x2 reference with:
+
+```bash
+python3 controlled_experiments/run_multiplication.py \
+  --task square_mod --preset easy --steps 4000 \
+  --architecture full_token_recurrent --full_token_layers 4 --recurrences 2 \
+  --loss token_ce --untie_embeddings
+```
+
+The result includes exact and digit accuracy, accuracy at every output position
+from both edges, and buckets by input, modulus, square, and quotient lengths.
+
 Run the current scratchpad architecture locally with, for example:
 
 ```bash
