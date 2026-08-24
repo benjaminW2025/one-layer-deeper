@@ -69,6 +69,52 @@ Each preset produces `train.jsonl`, held-out in-range `test.jsonl`,
 factors are longer). Add reduction only after the multiplication baseline and
 its length-generalization measurements are working.
 
+Generate the modular-reduction datasets with:
+
+```bash
+python3 controlled_experiments/generate_reduction.py --preset easy
+python3 controlled_experiments/generate_reduction.py --preset medium
+```
+
+Each numerator `z` is an actual product of two hidden decimal factors. The
+model receives only `z` and `N` and predicts `z mod N`. In addition to held-out
+in-range prompts, the generator creates `ood_z_long`, `ood_n_long`, and
+`ood_both_long` splits. Records retain factor, quotient, remainder, and digit-
+length metadata for diagnostic bucketing.
+
+Run the first fixed-step reduction comparisons with:
+
+```bash
+# S2x4 with ordinary token CE
+python3 controlled_experiments/run_multiplication.py \
+  --task reduction --preset easy --steps 2000 \
+  --architecture scratchpad --scratchpad_slots 4 --recurrences 4 \
+  --loss token_ce --untie_embeddings
+
+# S2x4 with smooth hard-sequence CE
+python3 controlled_experiments/run_multiplication.py \
+  --task reduction --preset easy --steps 2000 \
+  --architecture scratchpad --scratchpad_slots 4 --recurrences 4 \
+  --loss hard_sequence_05 --untie_embeddings
+
+# U8 with ordinary token CE
+python3 controlled_experiments/run_multiplication.py \
+  --task reduction --preset easy --steps 2000 \
+  --architecture full_token --full_token_layers 8 \
+  --loss token_ce --untie_embeddings
+
+# U8 with smooth hard-sequence CE
+python3 controlled_experiments/run_multiplication.py \
+  --task reduction --preset easy --steps 2000 \
+  --architecture full_token --full_token_layers 8 \
+  --loss hard_sequence_05 --untie_embeddings
+```
+
+Reduction results include exact and digit accuracy by quotient digits, visible
+numerator digits, modulus digits, and output position counted from both ends.
+Compare learning at matched update counts; treat elapsed time as a separate
+compute-efficiency measurement.
+
 Run the current scratchpad architecture locally with, for example:
 
 ```bash

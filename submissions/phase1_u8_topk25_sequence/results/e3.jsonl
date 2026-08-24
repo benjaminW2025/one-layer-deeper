@@ -1,0 +1,9 @@
+{"elapsed_seconds":8.1,"exact_accuracy":0.0,"loss":2.976,"seed":74,"step":1,"type":"train"}
+{"elapsed_seconds":20.9,"exact_accuracy":0.0,"loss":2.299,"seed":74,"step":100,"type":"train"}
+{"elapsed_seconds":34.0,"exact_accuracy":0.012,"loss":2.232,"seed":74,"step":200,"type":"train"}
+{"elapsed_seconds":45.6,"exact_accuracy":0.008,"loss":2.24,"seed":74,"step":300,"type":"train"}
+{"elapsed_seconds":58.5,"exact_accuracy":0.002,"loss":2.241,"seed":74,"step":400,"type":"train"}
+{"elapsed_seconds":60.4,"exact_accuracy":0.0,"loss":2.231,"seed":74,"step":415,"type":"train"}
+{"exact_accuracy":0.011,"loss":2.133,"seed":74,"split":"test","type":"evaluation"}
+{"exact_accuracy":0.023,"loss":2.214,"seed":74,"split":"ood","type":"evaluation"}
+{"completed_steps":415,"mean_exact_accuracy":0.017,"training_seconds":60.4,"type":"summary"}

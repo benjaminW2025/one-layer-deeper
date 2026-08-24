@@ -1,4 +1,4 @@
-"""Train and evaluate the current scratchpad architecture on multiplication."""
+"""Train and evaluate controlled decimal arithmetic tasks."""
 
 from __future__ import annotations
 
@@ -47,6 +47,12 @@ def collate(records: list[dict[str, object]]) -> dict[str, Tensor]:
     positions = torch.full((batch, target_length), -1, dtype=torch.long)
     a_values = torch.empty(batch, dtype=torch.long)
     b_values = torch.empty(batch, dtype=torch.long)
+    z_values = torch.full((batch,), -1, dtype=torch.long)
+    modulus_values = torch.full((batch,), -1, dtype=torch.long)
+    quotient_values = torch.full((batch,), -1, dtype=torch.long)
+    z_digits = torch.full((batch,), -1, dtype=torch.long)
+    modulus_digits = torch.full((batch,), -1, dtype=torch.long)
+    quotient_digits = torch.full((batch,), -1, dtype=torch.long)
     for row, record in enumerate(records):
         inputs = torch.tensor(record["input_ids"], dtype=torch.long)
         targets = torch.tensor(record["labels"], dtype=torch.long)
@@ -58,6 +64,13 @@ def collate(records: list[dict[str, object]]) -> dict[str, Tensor]:
         )
         a_values[row] = int(record["a"])
         b_values[row] = int(record["b"])
+        if "z" in record:
+            z_values[row] = int(record["z"])
+            modulus_values[row] = int(record["modulus"])
+            quotient_values[row] = int(record["quotient"])
+            z_digits[row] = int(record["z_digits"])
+            modulus_digits[row] = int(record["modulus_digits"])
+            quotient_digits[row] = int(record["quotient_digits"])
     return {
         "input_ids": input_ids,
         "labels": labels,
@@ -65,6 +78,12 @@ def collate(records: list[dict[str, object]]) -> dict[str, Tensor]:
         "positions": positions,
         "a": a_values,
         "b": b_values,
+        "z": z_values,
+        "modulus": modulus_values,
+        "quotient": quotient_values,
+        "z_digits": z_digits,
+        "modulus_digits": modulus_digits,
+        "quotient_digits": quotient_digits,
     }
 
 
@@ -181,17 +200,70 @@ class FullTokenTransformer(torch.nn.Module):
         return self.head(self.final_norm(context)), None
 
 
-def loss_and_predictions(model, batch: dict[str, Tensor]) -> tuple[Tensor, Tensor, Tensor]:
+def loss_and_predictions(
+    model,
+    batch: dict[str, Tensor],
+    loss_kind: str = "token_ce",
+) -> tuple[Tensor, Tensor, Tensor]:
     logits, _ = model(batch["input_ids"], attention_mask=batch["mask"])
     row = torch.arange(logits.shape[0], device=logits.device)[:, None]
     selected = logits[row, batch["positions"].clamp_min(0)]
     valid = batch["labels"] != -100
-    loss = torch.nn.functional.cross_entropy(selected[valid], batch["labels"][valid])
+    token_losses = F.cross_entropy(
+        selected.transpose(1, 2),
+        batch["labels"],
+        ignore_index=-100,
+        reduction="none",
+    )
+    if loss_kind == "token_ce":
+        loss = token_losses[valid].mean()
+    elif loss_kind == "hard_sequence_05":
+        counts = valid.sum(dim=1)
+        sequence_losses = (
+            (token_losses * valid).sum(dim=1) / counts.clamp_min(1)
+        )[counts > 0]
+        weights = sequence_losses.detach().clamp_min(1e-8).sqrt()
+        weights = weights / weights.mean().clamp_min(1e-8)
+        loss = (weights * sequence_losses).mean()
+    else:
+        raise ValueError(f"unknown loss kind: {loss_kind}")
     return loss, selected.argmax(dim=-1), valid
 
 
+def _bucket_metrics(
+    totals: dict[int, list[int]],
+    key: int,
+    exact_correct: int,
+    digit_correct: int,
+    digit_total: int,
+) -> None:
+    bucket = totals.setdefault(key, [0, 0, 0, 0])
+    bucket[0] += exact_correct
+    bucket[1] += 1
+    bucket[2] += digit_correct
+    bucket[3] += digit_total
+
+
+def _finish_buckets(totals: dict[int, list[int]]) -> dict[str, dict[str, float | int]]:
+    return {
+        str(key): {
+            "examples": values[1],
+            "exact_accuracy": values[0] / values[1],
+            "digit_accuracy": values[2] / values[3],
+        }
+        for key, values in sorted(totals.items())
+    }
+
+
 @torch.no_grad()
-def evaluate(model, loader: DataLoader, device: torch.device, example_count: int) -> dict[str, object]:
+def evaluate(
+    model,
+    loader: DataLoader,
+    device: torch.device,
+    example_count: int,
+    task: str = "multiplication",
+    loss_kind: str = "token_ce",
+) -> dict[str, object]:
     model.eval()
     exact = 0
     examples = 0
@@ -199,11 +271,16 @@ def evaluate(model, loader: DataLoader, device: torch.device, example_count: int
     digit_count = 0
     passed: list[dict[str, object]] = []
     failed: list[dict[str, object]] = []
+    position_left: dict[int, list[int]] = {}
+    position_right: dict[int, list[int]] = {}
+    quotient_digit_buckets: dict[int, list[int]] = {}
+    z_digit_buckets: dict[int, list[int]] = {}
+    modulus_digit_buckets: dict[int, list[int]] = {}
     context = torch.autocast("cuda", dtype=torch.bfloat16) if device.type == "cuda" else nullcontext()
     for host_batch in loader:
         batch = {name: value.to(device) for name, value in host_batch.items()}
         with context:
-            _, prediction, valid = loss_and_predictions(model, batch)
+            _, prediction, valid = loss_and_predictions(model, batch, loss_kind)
         matches = (prediction == batch["labels"]) | ~valid
         exact += matches.all(dim=1).sum().item()
         examples += prediction.shape[0]
@@ -211,17 +288,68 @@ def evaluate(model, loader: DataLoader, device: torch.device, example_count: int
         digit_count += valid.sum().item()
         for row in range(prediction.shape[0]):
             is_correct = matches[row].all().item()
+            row_valid = valid[row]
+            row_matches = prediction[row, row_valid] == batch["labels"][row, row_valid]
+            row_digit_count = int(row_valid.sum().item())
+            row_digit_correct = int(row_matches.sum().item())
+            for position, correct in enumerate(row_matches.tolist()):
+                left = position_left.setdefault(position, [0, 0])
+                left[0] += int(correct)
+                left[1] += 1
+                from_right = row_digit_count - position - 1
+                right = position_right.setdefault(from_right, [0, 0])
+                right[0] += int(correct)
+                right[1] += 1
+            if task == "reduction":
+                exact_value = int(is_correct)
+                _bucket_metrics(
+                    quotient_digit_buckets,
+                    int(batch["quotient_digits"][row].item()),
+                    exact_value,
+                    row_digit_correct,
+                    row_digit_count,
+                )
+                _bucket_metrics(
+                    z_digit_buckets,
+                    int(batch["z_digits"][row].item()),
+                    exact_value,
+                    row_digit_correct,
+                    row_digit_count,
+                )
+                _bucket_metrics(
+                    modulus_digit_buckets,
+                    int(batch["modulus_digits"][row].item()),
+                    exact_value,
+                    row_digit_correct,
+                    row_digit_count,
+                )
             if len(passed if is_correct else failed) >= example_count:
                 continue
-            valid_tokens = valid[row]
+            valid_tokens = row_valid
             predicted = "".join(
                 str(token - 7) if 7 <= token <= 16 else f"[{token}]"
                 for token in prediction[row, valid_tokens].tolist()
             )
+            if task == "reduction":
+                example_inputs = {
+                    "z": batch["z"][row].item(),
+                    "modulus": batch["modulus"][row].item(),
+                    "quotient": batch["quotient"][row].item(),
+                }
+                mathematical_answer = str(
+                    batch["z"][row].item() % batch["modulus"][row].item()
+                )
+            else:
+                example_inputs = {
+                    "a": batch["a"][row].item(),
+                    "b": batch["b"][row].item(),
+                }
+                mathematical_answer = str(
+                    batch["a"][row].item() * batch["b"][row].item()
+                )
             example = {
-                "a": batch["a"][row].item(),
-                "b": batch["b"][row].item(),
-                "mathematical_answer": str(batch["a"][row].item() * batch["b"][row].item()),
+                **example_inputs,
+                "mathematical_answer": mathematical_answer,
                 "expected_tokens": "".join(
                     str(token - 7)
                     for token in batch["labels"][row, valid_tokens].tolist()
@@ -229,21 +357,47 @@ def evaluate(model, loader: DataLoader, device: torch.device, example_count: int
                 "predicted": predicted,
             }
             (passed if is_correct else failed).append(example)
-    return {
+    result = {
         "exact_accuracy": exact / examples,
         "digit_accuracy": correct_digits / digit_count,
+        "accuracy_by_position_from_left": {
+            str(key): {"correct": values[0], "total": values[1], "accuracy": values[0] / values[1]}
+            for key, values in sorted(position_left.items())
+        },
+        "accuracy_by_position_from_right": {
+            str(key): {"correct": values[0], "total": values[1], "accuracy": values[0] / values[1]}
+            for key, values in sorted(position_right.items())
+        },
         "passed_examples": passed,
         "failed_examples": failed,
     }
+    if task == "reduction":
+        result.update(
+            {
+                "accuracy_by_quotient_digits": _finish_buckets(quotient_digit_buckets),
+                "accuracy_by_z_digits": _finish_buckets(z_digit_buckets),
+                "accuracy_by_modulus_digits": _finish_buckets(modulus_digit_buckets),
+            }
+        )
+    return result
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--task", choices=("multiplication", "squaring"), default="multiplication")
+    parser.add_argument(
+        "--task",
+        choices=("multiplication", "squaring", "reduction"),
+        default="multiplication",
+    )
     parser.add_argument("--preset", choices=("easy", "medium"), required=True)
     parser.add_argument("--steps", type=int, required=True)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--lr", type=float, default=2e-3)
+    parser.add_argument(
+        "--loss",
+        choices=("token_ce", "hard_sequence_05"),
+        default="token_ce",
+    )
     parser.add_argument(
         "--architecture",
         choices=("scratchpad", "full_token", "full_token_recurrent"),
@@ -251,6 +405,7 @@ def main() -> None:
     )
     parser.add_argument("--full_token_layers", type=int, default=8)
     parser.add_argument("--round_embeddings", action="store_true")
+    parser.add_argument("--untie_embeddings", action="store_true")
     parser.add_argument("--scratchpad_slots", type=int, default=4)
     parser.add_argument("--recurrences", type=int, default=4)
     parser.add_argument("--prompt_reader_layers", type=int, choices=(0, 1), default=0)
@@ -266,7 +421,14 @@ def main() -> None:
     root = ROOT / "controlled_experiments" / "data" / f"{args.task}_{args.preset}"
     train = MultiplicationDataset(root / "train.jsonl")
     datasets = {"train": train}
-    for split in ("test", "ood_long", "ood_one_long", "ood_both_long"):
+    for split in (
+        "test",
+        "ood_long",
+        "ood_one_long",
+        "ood_z_long",
+        "ood_n_long",
+        "ood_both_long",
+    ):
         path = root / f"{split}.jsonl"
         if path.exists():
             datasets[split] = MultiplicationDataset(path)
@@ -281,6 +443,8 @@ def main() -> None:
     submission.NUM_SCRATCH_TOKENS = args.scratchpad_slots
     submission.NUM_RECURRENCES = args.recurrences
     submission.NUM_PROMPT_READER_LAYERS = args.prompt_reader_layers
+    if args.untie_embeddings:
+        submission.TIE_EMBEDDINGS = False
     max_seq_len = max(
         len(record["input_ids"])
         for dataset in datasets.values()
@@ -312,7 +476,7 @@ def main() -> None:
         batch = {name: value.to(device) for name, value in host_batch.items()}
         optimizer.zero_grad(set_to_none=True)
         with autocast:
-            loss, _, _ = loss_and_predictions(model, batch)
+            loss, _, _ = loss_and_predictions(model, batch, args.loss)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
@@ -326,22 +490,32 @@ def main() -> None:
         "steps": args.steps,
         "batch_size": args.batch_size,
         "lr": args.lr,
+        "loss": args.loss,
         "scratchpad_slots": args.scratchpad_slots,
         "recurrences": args.recurrences,
         "prompt_reader_layers": args.prompt_reader_layers,
         "full_token_layers": args.full_token_layers,
         "round_embeddings": args.round_embeddings,
+        "untie_embeddings": args.untie_embeddings,
         "parameter_count": sum(parameter.numel() for parameter in model.parameters()),
     }
     summary.update(
         {
-            split: evaluate(model, loader, device, args.example_count)
+            split: evaluate(
+                model,
+                loader,
+                device,
+                args.example_count,
+                args.task,
+                args.loss,
+            )
             for split, loader in loaders.items()
         }
     )
     output = ROOT / "controlled_experiments" / "results" / (
         f"{args.task}_{args.preset}_{args.architecture}_slots{args.scratchpad_slots}_r{args.recurrences}"
         f"_reader{args.prompt_reader_layers}_clock{int(args.round_embeddings)}"
+        f"_loss{args.loss}_untied{int(args.untie_embeddings)}"
         f"_s{args.steps}_seed{args.seed}.json"
     )
     output.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
