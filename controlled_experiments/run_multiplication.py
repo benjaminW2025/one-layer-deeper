@@ -191,7 +191,7 @@ class FullTokenTransformer(torch.nn.Module):
         if source.EMBED_INIT_STD is not None:
             torch.nn.init.normal_(self.token_embedding.weight, std=source.EMBED_INIT_STD)
 
-    def forward(self, input_ids: Tensor, attention_mask: Tensor | None = None):
+    def encode(self, input_ids: Tensor, attention_mask: Tensor | None = None) -> Tensor:
         context = self.token_embedding(input_ids)
         rope = self.source.rope_tables(
             input_ids.shape[1],
@@ -204,7 +204,246 @@ class FullTokenTransformer(torch.nn.Module):
                 context = context + self.round_embeddings[round_index]
             for block in self.blocks:
                 context = block(context, attention_mask, rope)
+        return context
+
+    def forward(self, input_ids: Tensor, attention_mask: Tensor | None = None):
+        context = self.encode(input_ids, attention_mask)
         return self.head(self.final_norm(context)), None
+
+
+class WriterCrossAttention(torch.nn.Module):
+    """Answer queries read the completed arithmetic workspace."""
+
+    def __init__(self, width: int, heads: int) -> None:
+        super().__init__()
+        self.width = width
+        self.heads = heads
+        self.query_norm = LocalRMSNorm(width)
+        self.context_norm = LocalRMSNorm(width)
+        self.query = torch.nn.Linear(width, width)
+        self.key_value = torch.nn.Linear(width, 2 * width)
+        self.out = torch.nn.Linear(width, width)
+
+    def forward(
+        self,
+        query: Tensor,
+        context: Tensor,
+        context_mask: Tensor | None,
+    ) -> Tensor:
+        batch, query_length, _ = query.shape
+        context_length = context.shape[1]
+        q = self.query(self.query_norm(query))
+        k, v = self.key_value(self.context_norm(context)).chunk(2, dim=-1)
+        q = q.view(batch, query_length, self.heads, -1).transpose(1, 2)
+        k = k.view(batch, context_length, self.heads, -1).transpose(1, 2)
+        v = v.view(batch, context_length, self.heads, -1).transpose(1, 2)
+        mask = (
+            context_mask[:, None, None, :].bool()
+            if context_mask is not None
+            else None
+        )
+        read = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        read = read.transpose(1, 2).contiguous().view(batch, query_length, self.width)
+        return query + self.out(read)
+
+
+def answer_slot_layout(
+    input_ids: Tensor,
+    output_token_id: int,
+    max_answer_tokens: int,
+) -> tuple[Tensor, Tensor]:
+    """Positions and validity for explicit OUT slots, ordered ones first."""
+    batch, length = input_ids.shape
+    output_mask = input_ids == output_token_id
+    positions = torch.arange(length, device=input_ids.device).expand(batch, -1)
+    positions = positions.masked_fill(~output_mask, length).sort(dim=1).values
+    positions = positions[:, :max_answer_tokens]
+    valid = positions < length
+    return positions.clamp_max(length - 1), valid
+
+
+def merge_answer_logits(
+    base_logits: Tensor,
+    positions: Tensor,
+    valid: Tensor,
+    answer_logits: Tensor,
+) -> Tensor:
+    """Scatter differentiably computed answer logits back into sequence logits."""
+    length = base_logits.shape[1]
+    assignment = F.one_hot(positions, num_classes=length).to(answer_logits.dtype)
+    assignment = assignment * valid.unsqueeze(-1)
+    writer_logits = torch.einsum("bal,bav->blv", assignment, answer_logits)
+    writer_positions = assignment.sum(dim=1).bool().unsqueeze(-1)
+    return torch.where(writer_positions, writer_logits, base_logits)
+
+
+def writer_position_features(
+    length: int,
+    width: int,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> Tensor:
+    """Deterministic digit-place features that extend to unseen output widths."""
+    half = width // 2
+    inverse_frequency = 1000.0 ** (
+        -torch.arange(half, device=device, dtype=torch.float32) / half
+    )
+    positions = torch.arange(length, device=device, dtype=torch.float32)
+    angles = positions[:, None] * inverse_frequency[None, :]
+    return torch.cat((angles.cos(), angles.sin()), dim=-1).to(dtype)
+
+
+class GRUAnswerWriter(torch.nn.Module):
+    """R4x2 encoder followed by one shared least-to-most-significant digit cell."""
+
+    def __init__(
+        self,
+        source,
+        spec: ModelSpec,
+        layers: int,
+        rounds: int,
+        max_answer_tokens: int,
+        output_token_id: int,
+        use_round_embeddings: bool = False,
+    ) -> None:
+        super().__init__()
+        self.encoder = FullTokenTransformer(
+            source, spec, layers, rounds, use_round_embeddings
+        )
+        self.config = self.encoder.config
+        self.max_answer_tokens = max_answer_tokens
+        self.output_token_id = output_token_id
+        width = source.D_MODEL
+        self.answer_query = torch.nn.Parameter(torch.empty(width))
+        self.initial_hidden = torch.nn.Parameter(torch.empty(width))
+        torch.nn.init.normal_(self.answer_query, std=0.02)
+        torch.nn.init.normal_(self.initial_hidden, std=0.02)
+        self.workspace_read = WriterCrossAttention(width, source.NUM_HEADS)
+        self.cell = torch.nn.GRUCell(width, width)
+        self.writer_norm = LocalRMSNorm(width)
+
+    def forward(self, input_ids: Tensor, attention_mask: Tensor | None = None):
+        context = self.encoder.encode(input_ids, attention_mask)
+        positions, valid = answer_slot_layout(
+            input_ids, self.output_token_id, self.max_answer_tokens
+        )
+        batch = input_ids.shape[0]
+        place = writer_position_features(
+            self.max_answer_tokens,
+            self.answer_query.numel(),
+            input_ids.device,
+            context.dtype,
+        )
+        query = self.answer_query + place
+        query = query.unsqueeze(0).expand(batch, -1, -1)
+        evidence = self.workspace_read(query, context, attention_mask)
+        hidden = self.initial_hidden.unsqueeze(0).expand(batch, -1)
+        states: list[Tensor] = []
+        for digit_index in range(self.max_answer_tokens):
+            candidate = self.cell(evidence[:, digit_index], hidden)
+            active = valid[:, digit_index].unsqueeze(-1)
+            hidden = torch.where(active, candidate, hidden)
+            states.append(hidden)
+        answer_states = torch.stack(states, dim=1)
+        answer_logits = self.encoder.head(self.writer_norm(answer_states))
+        base_logits = self.encoder.head(self.encoder.final_norm(context))
+        return merge_answer_logits(
+            base_logits, positions, valid, answer_logits
+        ), None
+
+
+class CausalAnswerBlock(torch.nn.Module):
+    """Workspace cross-attention plus causal lower-to-higher digit communication."""
+
+    def __init__(self, width: int, heads: int) -> None:
+        super().__init__()
+        self.width = width
+        self.heads = heads
+        self.workspace_read = WriterCrossAttention(width, heads)
+        self.self_norm = LocalRMSNorm(width)
+        self.qkv = torch.nn.Linear(width, 3 * width)
+        self.self_out = torch.nn.Linear(width, width)
+        self.mixer_norm = LocalRMSNorm(width)
+        self.up = torch.nn.Linear(width, 4 * width)
+        self.down = torch.nn.Linear(4 * width, width)
+
+    def forward(
+        self,
+        answer: Tensor,
+        answer_valid: Tensor,
+        context: Tensor,
+        context_mask: Tensor | None,
+    ) -> Tensor:
+        answer = self.workspace_read(answer, context, context_mask)
+        residual = answer
+        normalized = self.self_norm(answer)
+        batch, length, _ = normalized.shape
+        q, k, v = self.qkv(normalized).chunk(3, dim=-1)
+        q = q.view(batch, length, self.heads, -1).transpose(1, 2)
+        k = k.view(batch, length, self.heads, -1).transpose(1, 2)
+        v = v.view(batch, length, self.heads, -1).transpose(1, 2)
+        causal = torch.ones(
+            (length, length), device=answer.device, dtype=torch.bool
+        ).tril()
+        mask = causal[None, None, :, :] & answer_valid[:, None, None, :]
+        mixed = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        mixed = mixed.transpose(1, 2).contiguous().view(batch, length, self.width)
+        answer = residual + self.self_out(mixed)
+        answer = answer + self.down(F.gelu(self.up(self.mixer_norm(answer))))
+        return answer * answer_valid.unsqueeze(-1)
+
+
+class CausalTransformerAnswerWriter(torch.nn.Module):
+    """R4x2 encoder with dedicated answer queries and a causal digit writer."""
+
+    def __init__(
+        self,
+        source,
+        spec: ModelSpec,
+        layers: int,
+        rounds: int,
+        max_answer_tokens: int,
+        output_token_id: int,
+        writer_layers: int,
+        use_round_embeddings: bool = False,
+    ) -> None:
+        super().__init__()
+        self.encoder = FullTokenTransformer(
+            source, spec, layers, rounds, use_round_embeddings
+        )
+        self.config = self.encoder.config
+        self.max_answer_tokens = max_answer_tokens
+        self.output_token_id = output_token_id
+        width = source.D_MODEL
+        self.answer_query = torch.nn.Parameter(torch.empty(width))
+        torch.nn.init.normal_(self.answer_query, std=0.02)
+        self.writer = torch.nn.ModuleList(
+            CausalAnswerBlock(width, source.NUM_HEADS) for _ in range(writer_layers)
+        )
+        self.writer_norm = LocalRMSNorm(width)
+
+    def forward(self, input_ids: Tensor, attention_mask: Tensor | None = None):
+        context = self.encoder.encode(input_ids, attention_mask)
+        positions, valid = answer_slot_layout(
+            input_ids, self.output_token_id, self.max_answer_tokens
+        )
+        batch = input_ids.shape[0]
+        place = writer_position_features(
+            self.max_answer_tokens,
+            self.answer_query.numel(),
+            input_ids.device,
+            context.dtype,
+        )
+        answer = self.answer_query + place
+        answer = answer.unsqueeze(0).expand(batch, -1, -1)
+        answer = answer * valid.unsqueeze(-1)
+        for block in self.writer:
+            answer = block(answer, valid, context, attention_mask)
+        answer_logits = self.encoder.head(self.writer_norm(answer))
+        base_logits = self.encoder.head(self.encoder.final_norm(context))
+        return merge_answer_logits(
+            base_logits, positions, valid, answer_logits
+        ), None
 
 
 def loss_and_predictions(
@@ -433,10 +672,17 @@ def main() -> None:
     )
     parser.add_argument(
         "--architecture",
-        choices=("scratchpad", "full_token", "full_token_recurrent"),
+        choices=(
+            "scratchpad",
+            "full_token",
+            "full_token_recurrent",
+            "full_token_gru_writer",
+            "full_token_causal_writer",
+        ),
         default="scratchpad",
     )
     parser.add_argument("--full_token_layers", type=int, default=8)
+    parser.add_argument("--writer_layers", type=int, default=2)
     parser.add_argument("--round_embeddings", action="store_true")
     parser.add_argument("--untie_embeddings", action="store_true")
     parser.add_argument("--scratchpad_slots", type=int, default=4)
@@ -448,6 +694,14 @@ def main() -> None:
     args = parser.parse_args()
     if args.steps < 1:
         raise ValueError("--steps must be positive")
+    writer_architectures = {
+        "full_token_gru_writer",
+        "full_token_causal_writer",
+    }
+    if args.architecture in writer_architectures and args.task != "squaring":
+        raise ValueError("answer-writer controls currently require --task squaring")
+    if args.writer_layers < 1:
+        raise ValueError("--writer_layers must be positive")
 
     torch.manual_seed(args.seed)
     device = torch.device(args.device)
@@ -484,9 +738,35 @@ def main() -> None:
         for dataset in datasets.values()
         for record in dataset.records
     )
+    max_answer_tokens = max(
+        len(record["labels"])
+        for dataset in datasets.values()
+        for record in dataset.records
+    )
     model_spec = ModelSpec(17, max_seq_len, 500_000_000)
     if args.architecture == "scratchpad":
         model = submission.build_model(model_spec)
+    elif args.architecture == "full_token_gru_writer":
+        model = GRUAnswerWriter(
+            submission,
+            model_spec,
+            args.full_token_layers,
+            args.recurrences,
+            max_answer_tokens,
+            output_token_id=4,
+            use_round_embeddings=args.round_embeddings,
+        )
+    elif args.architecture == "full_token_causal_writer":
+        model = CausalTransformerAnswerWriter(
+            submission,
+            model_spec,
+            args.full_token_layers,
+            args.recurrences,
+            max_answer_tokens,
+            output_token_id=4,
+            writer_layers=args.writer_layers,
+            use_round_embeddings=args.round_embeddings,
+        )
     else:
         rounds = args.recurrences if args.architecture == "full_token_recurrent" else 1
         model = FullTokenTransformer(
@@ -529,6 +809,7 @@ def main() -> None:
         "recurrences": args.recurrences,
         "prompt_reader_layers": args.prompt_reader_layers,
         "full_token_layers": args.full_token_layers,
+        "writer_layers": args.writer_layers,
         "round_embeddings": args.round_embeddings,
         "untie_embeddings": args.untie_embeddings,
         "parameter_count": sum(parameter.numel() for parameter in model.parameters()),

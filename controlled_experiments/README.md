@@ -291,6 +291,51 @@ python3 controlled_experiments/run_multiplication.py \
   --architecture full_token --full_token_layers 8
 ```
 
+### Carry-aware answer-writer experiment
+
+The R4x2 direct-squaring model reaches 98.9% train digit accuracy and 80.4%
+test digit accuracy at 4,000 updates, but only 10.6% test exact accuracy. Its
+saved failures concentrate in the middle output positions, where cross-products
+and carries interact. Test whether explicit lower-to-higher digit communication
+closes that gap with this matched trio:
+
+```bash
+# Parallel-output R4x2 control.
+python3 controlled_experiments/run_multiplication.py \
+  --task squaring --preset easy --steps 4000 \
+  --architecture full_token_recurrent \
+  --full_token_layers 4 --recurrences 2 \
+  --loss token_ce --untie_embeddings --seed 74 --device cuda
+
+# One shared GRU cell, applied from the ones digit toward higher places.
+python3 controlled_experiments/run_multiplication.py \
+  --task squaring --preset easy --steps 4000 \
+  --architecture full_token_gru_writer \
+  --full_token_layers 4 --recurrences 2 \
+  --loss token_ce --untie_embeddings --seed 74 --device cuda
+
+# Two causal answer-Transformer blocks; higher digits attend to lower digits.
+python3 controlled_experiments/run_multiplication.py \
+  --task squaring --preset easy --steps 4000 \
+  --architecture full_token_causal_writer --writer_layers 2 \
+  --full_token_layers 4 --recurrences 2 \
+  --loss token_ce --untie_embeddings --seed 74 --device cuda
+```
+
+Both writers use dedicated learned answer queries and read the same completed
+R4x2 workspace. The GRU passes a continuous hidden state between digit places;
+the causal Transformer uses masked self-attention. Neither feeds back discrete
+predictions, so gradients remain end-to-end.
+
+The primary comparison is test accuracy at positions 3, 4, and 5 from the
+left, which are the thousands through hundred-thousands places in this
+least-significant-first dataset. Also compare total test exact accuracy, overall
+digit accuracy, OOD-long digit accuracy, parameter count, and elapsed time. A
+writer succeeds if middle-position and exact accuracy rise without merely
+trading away the already-strong lower-digit positions. Adaptive GRU halting is
+a later experiment only if the fixed shared cell first demonstrates useful
+carry propagation.
+
 ## Variable-recurrence macro-step test
 
 This is the next test after the four-distinct-block, two-recurrence model. It
