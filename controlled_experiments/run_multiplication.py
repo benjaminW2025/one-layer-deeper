@@ -158,6 +158,25 @@ class FullTokenBlock(torch.nn.Module):
         return context + self.down(F.gelu(self.up(self.mixer_norm(context))))
 
 
+def operand_segment_ids(
+    input_ids: Tensor,
+    *,
+    operand_a_token_id: int = 2,
+    operand_b_token_id: int = 3,
+    digit_offset: int = 7,
+) -> Tensor:
+    """Label decimal digits as operand A=1 or operand B=2."""
+
+    if input_ids.ndim != 2:
+        raise ValueError("input_ids must have shape [batch, length]")
+    is_digit = input_ids >= digit_offset
+    after_a = (input_ids == operand_a_token_id).cumsum(dim=1) > 0
+    after_b = (input_ids == operand_b_token_id).cumsum(dim=1) > 0
+    segments = torch.zeros_like(input_ids)
+    segments = torch.where(is_digit & after_a, 1, segments)
+    return torch.where(is_digit & after_b, 2, segments)
+
+
 class FullTokenTransformer(torch.nn.Module):
     """A conventional bidirectional Transformer for the learnability check."""
 
@@ -168,6 +187,7 @@ class FullTokenTransformer(torch.nn.Module):
         layers: int,
         rounds: int = 1,
         use_round_embeddings: bool = False,
+        use_operand_embeddings: bool = False,
     ) -> None:
         super().__init__()
         self.source = source
@@ -181,6 +201,15 @@ class FullTokenTransformer(torch.nn.Module):
             torch.nn.init.normal_(self.round_embeddings, std=0.02)
         self.config = source.Config(spec.vocab_size, spec.max_seq_len)
         self.token_embedding = torch.nn.Embedding(spec.vocab_size, source.D_MODEL)
+        self.operand_embedding = (
+            torch.nn.Embedding(3, source.D_MODEL, padding_idx=0)
+            if use_operand_embeddings
+            else None
+        )
+        if self.operand_embedding is not None:
+            torch.nn.init.normal_(self.operand_embedding.weight[1:], std=0.02)
+            with torch.no_grad():
+                self.operand_embedding.weight[0].zero_()
         self.blocks = torch.nn.ModuleList(
             FullTokenBlock(source.D_MODEL, source.NUM_HEADS) for _ in range(layers)
         )
@@ -193,6 +222,10 @@ class FullTokenTransformer(torch.nn.Module):
 
     def encode(self, input_ids: Tensor, attention_mask: Tensor | None = None) -> Tensor:
         context = self.token_embedding(input_ids)
+        if self.operand_embedding is not None:
+            context = context + self.operand_embedding(
+                operand_segment_ids(input_ids)
+            )
         rope = self.source.rope_tables(
             input_ids.shape[1],
             self.source.D_MODEL // self.source.NUM_HEADS,
@@ -701,6 +734,7 @@ def main() -> None:
     parser.add_argument("--full_token_layers", type=int, default=8)
     parser.add_argument("--writer_layers", type=int, default=2)
     parser.add_argument("--round_embeddings", action="store_true")
+    parser.add_argument("--operand_embeddings", action="store_true")
     parser.add_argument("--untie_embeddings", action="store_true")
     parser.add_argument("--scratchpad_slots", type=int, default=4)
     parser.add_argument("--recurrences", type=int, default=4)
@@ -719,6 +753,15 @@ def main() -> None:
         raise ValueError("answer-writer controls currently require --task squaring")
     if args.writer_layers < 1:
         raise ValueError("--writer_layers must be positive")
+    if args.operand_embeddings and args.task != "multiplication":
+        raise ValueError("--operand_embeddings currently requires --task multiplication")
+    if args.operand_embeddings and args.architecture not in {
+        "full_token",
+        "full_token_recurrent",
+    }:
+        raise ValueError(
+            "--operand_embeddings currently requires a full-token architecture"
+        )
 
     torch.manual_seed(args.seed)
     device = torch.device(args.device)
@@ -792,6 +835,7 @@ def main() -> None:
             args.full_token_layers,
             rounds,
             args.round_embeddings,
+            args.operand_embeddings,
         )
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.95), weight_decay=0.1)
@@ -828,6 +872,7 @@ def main() -> None:
         "full_token_layers": args.full_token_layers,
         "writer_layers": args.writer_layers,
         "round_embeddings": args.round_embeddings,
+        "operand_embeddings": args.operand_embeddings,
         "untie_embeddings": args.untie_embeddings,
         "parameter_count": sum(parameter.numel() for parameter in model.parameters()),
     }
@@ -847,6 +892,7 @@ def main() -> None:
     output = ROOT / "controlled_experiments" / "results" / (
         f"{args.task}_{args.preset}_{args.architecture}_slots{args.scratchpad_slots}_r{args.recurrences}"
         f"_reader{args.prompt_reader_layers}_clock{int(args.round_embeddings)}"
+        f"_operand{int(args.operand_embeddings)}"
         f"_loss{args.loss}_untied{int(args.untie_embeddings)}"
         f"_s{args.steps}_seed{args.seed}.json"
     )

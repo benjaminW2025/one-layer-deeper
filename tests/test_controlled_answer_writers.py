@@ -8,9 +8,11 @@ from benchmark import ModelSpec
 from controlled_experiments.run_multiplication import (
     CausalAnswerBlock,
     CausalTransformerAnswerWriter,
+    FullTokenTransformer,
     GRUAnswerWriter,
     answer_slot_layout,
     load_submission,
+    operand_segment_ids,
 )
 
 
@@ -36,6 +38,36 @@ class ControlledAnswerWriterTests(unittest.TestCase):
         self.assertEqual(valid[0].tolist(), [True] * 6 + [False] * 2)
         self.assertEqual(positions[1].tolist(), list(range(6, 14)))
         self.assertTrue(valid[1].all().item())
+
+    def test_operand_segment_ids_mark_only_operand_digits(self) -> None:
+        input_ids = torch.tensor(
+            [
+                [2, 8, 9, 3, 10, 11, 0],
+                [2, 12, 3, 13, 14, 15, 0],
+            ]
+        )
+        self.assertEqual(
+            operand_segment_ids(input_ids).tolist(),
+            [
+                [0, 1, 1, 0, 2, 2, 0],
+                [0, 1, 0, 2, 2, 2, 0],
+            ],
+        )
+
+    def test_full_token_operand_embeddings_receive_gradient(self) -> None:
+        model = FullTokenTransformer(
+            self.source,
+            self.spec,
+            layers=1,
+            rounds=1,
+            use_operand_embeddings=True,
+        )
+        input_ids = torch.tensor([[2, 8, 9, 3, 10, 11]])
+        logits, _ = model(input_ids, torch.ones_like(input_ids, dtype=torch.bool))
+        logits.square().mean().backward()
+        gradient = model.operand_embedding.weight.grad
+        self.assertIsNotNone(gradient)
+        self.assertGreater(gradient[1:].abs().sum().item(), 0.0)
 
     def test_writers_forward_and_backward(self) -> None:
         models = (
