@@ -1,0 +1,7 @@
+task,bits,modulus,positional,seed,cohort,x_space,x_coverage,d_model,n_layers,steps,params,lr,abacus_max_k,loss_reduction,final_loss,diverged,flat,device,n_eval,exact_acc,digit_acc,chance_exact,chance_digit,per_place_acc,mean_wrong_digits
+squaremod,14,12319,rope,0,train_seen,12096,0.41336,256,4,8000,3166221,0.0003,8,token,1e-05,False,False,cuda:2,500,1.0,1.0,0.006,0.17558,1.000|1.000|1.000|1.000|1.000,0.0
+squaremod,14,12319,rope,0,test_fresh,12096,0.41336,256,4,8000,3166221,0.0003,8,token,1e-05,False,False,cuda:2,500,0.0,0.14481,0.006,0.17221,0.108|0.100|0.108|0.128|0.952,3.496
+squaremod,18,147379,rope,0,train_seen,146584,0.03411,256,4,8000,3166221,0.0003,8,token,0.0,False,False,cuda:2,500,1.0,1.0,0.004,0.18045,1.000|1.000|1.000|1.000|1.000|1.000,0.0
+squaremod,18,147379,rope,0,test_fresh,146584,0.03411,256,4,8000,3166221,0.0003,8,token,0.0,False,False,cuda:2,500,0.0,0.14734,0.002,0.17681,0.102|0.090|0.074|0.095|0.116|1.000,4.456
+squaremod,14,12319,rope,0,train_seen,12096,0.41336,256,4,100000,3166221,0.0003,8,token,0.0877,False,False,cuda:2,500,0.912,0.97695,0.006,0.17558,0.970|0.976|0.980|0.978|1.000,1.068
+squaremod,14,12319,rope,0,test_fresh,12096,0.41336,256,4,100000,3166221,0.0003,8,token,0.0877,False,False,cuda:2,500,0.0,0.13699,0.006,0.17221,0.116|0.104|0.100|0.095|0.916,3.528

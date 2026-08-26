@@ -1,0 +1,2 @@
+task,variant,positional,seed,cohort,ood,bits,n_train_moduli,n_ood_moduli,d_model,n_layers,steps,params,lr,abacus_max_k,loss_reduction,final_loss,diverged,flat,device,n_eval,exact_acc,digit_acc,chance_exact,chance_digit,per_place_acc,mean_wrong_digits
+reduce_fixed_n,fixed_n,rope,0,id_fresh,False,14,1,0,256,4,100000,3166221,0.0003,8,token,0.0645,False,False,cuda:3,500,0.0,0.14625,0.004,0.17094,0.110|0.108|0.100|0.110|0.948,3.526
