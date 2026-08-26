@@ -294,7 +294,7 @@ def writer_position_features(
 
 
 class GRUAnswerWriter(torch.nn.Module):
-    """R4x2 encoder followed by one shared least-to-most-significant digit cell."""
+    """R4x2 encoder with recurrent least-to-most-significant corrections."""
 
     def __init__(
         self,
@@ -320,6 +320,10 @@ class GRUAnswerWriter(torch.nn.Module):
         torch.nn.init.normal_(self.initial_hidden, std=0.02)
         self.workspace_read = WriterCrossAttention(width, source.NUM_HEADS)
         self.cell = torch.nn.GRUCell(width, width)
+        self.correction = torch.nn.Linear(width, width, bias=False)
+        # Begin as the parallel R4x2 model. The writer learns corrections rather
+        # than replacing an already-useful answer representation from step one.
+        torch.nn.init.zeros_(self.correction.weight)
         self.writer_norm = LocalRMSNorm(width)
 
     def forward(self, input_ids: Tensor, attention_mask: Tensor | None = None):
@@ -334,16 +338,29 @@ class GRUAnswerWriter(torch.nn.Module):
             input_ids.device,
             context.dtype,
         )
-        query = self.answer_query + place
-        query = query.unsqueeze(0).expand(batch, -1, -1)
-        evidence = self.workspace_read(query, context, attention_mask)
+        row = torch.arange(batch, device=input_ids.device)[:, None]
+        parallel_answer = context[row, positions]
+        parallel_answer = parallel_answer * valid.unsqueeze(-1)
         hidden = self.initial_hidden.unsqueeze(0).expand(batch, -1)
         states: list[Tensor] = []
         for digit_index in range(self.max_answer_tokens):
-            candidate = self.cell(evidence[:, digit_index], hidden)
+            # The accumulated scratch/carry state participates in the query, so
+            # each digit can retrieve different workspace evidence based on all
+            # less-significant digits processed so far.
+            query = (
+                parallel_answer[:, digit_index]
+                + self.answer_query
+                + place[digit_index]
+                + hidden
+            )
+            evidence = self.workspace_read(
+                query.unsqueeze(1), context, attention_mask
+            ).squeeze(1)
+            candidate = self.cell(evidence, hidden)
             active = valid[:, digit_index].unsqueeze(-1)
             hidden = torch.where(active, candidate, hidden)
-            states.append(hidden)
+            refined = parallel_answer[:, digit_index] + self.correction(hidden)
+            states.append(refined * active)
         answer_states = torch.stack(states, dim=1)
         answer_logits = self.encoder.head(self.writer_norm(answer_states))
         base_logits = self.encoder.head(self.encoder.final_norm(context))

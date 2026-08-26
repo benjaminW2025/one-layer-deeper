@@ -54,6 +54,29 @@ class ControlledAnswerWriterTests(unittest.TestCase):
                 self.assertIsNotNone(model.answer_query.grad)
                 self.assertTrue(torch.isfinite(model.answer_query.grad).all())
 
+    def test_gru_writer_starts_as_parallel_encoder_and_reads_per_digit(self) -> None:
+        model = GRUAnswerWriter(self.source, self.spec, 1, 1, 8, 4).eval()
+        read_calls = 0
+
+        def count_read(module, inputs, output):
+            nonlocal read_calls
+            read_calls += 1
+
+        handle = model.workspace_read.register_forward_hook(count_read)
+        with torch.no_grad():
+            context = model.encoder.encode(self.input_ids, self.mask)
+            parallel_logits = model.encoder.head(model.encoder.final_norm(context))
+            writer_logits, _ = model(self.input_ids, self.mask)
+        handle.remove()
+
+        positions, valid = answer_slot_layout(self.input_ids, 4, 8)
+        row = torch.arange(self.input_ids.shape[0])[:, None]
+        torch.testing.assert_close(
+            writer_logits[row, positions][valid],
+            parallel_logits[row, positions][valid],
+        )
+        self.assertEqual(read_calls, 8)
+
     def test_causal_block_prevents_higher_digits_affecting_lower_digits(self) -> None:
         block = CausalAnswerBlock(width=16, heads=4).eval()
         answer = torch.randn(2, 8, 16)
