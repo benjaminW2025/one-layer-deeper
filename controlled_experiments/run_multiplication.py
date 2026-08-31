@@ -551,6 +551,174 @@ class DistributedDigitTapeTransformer(torch.nn.Module):
         ), None
 
 
+def right_aligned_field_states(
+    context: Tensor,
+    fields: Tensor,
+    right_positions: Tensor,
+    *,
+    field_id: int,
+    slots: int,
+) -> tuple[Tensor, Tensor]:
+    """Gather one field into fixed slots aligned by decimal place from the right."""
+
+    slot_indices = slots - 1 - right_positions
+    valid_tokens = (fields == field_id) & (slot_indices >= 0) & (slot_indices < slots)
+    assignment = F.one_hot(slot_indices.clamp(0, slots - 1), num_classes=slots)
+    assignment = assignment * valid_tokens.unsqueeze(-1)
+    states = torch.einsum("bls,bld->bsd", assignment.to(context.dtype), context)
+    valid_slots = assignment.sum(dim=1).bool()
+    return states, valid_slots
+
+
+class PairInteractionWorkspaceTransformer(torch.nn.Module):
+    """Single-pass square-mod model with learned symmetric digit-pair tokens."""
+
+    def __init__(
+        self,
+        source,
+        spec: ModelSpec,
+        layers: int,
+        max_x_tokens: int,
+        max_answer_tokens: int,
+    ) -> None:
+        super().__init__()
+        if layers < 2:
+            raise ValueError("pair workspace requires at least two layers")
+        self.core = FullTokenTransformer(
+            source,
+            spec,
+            layers=1,
+            rounds=1,
+            use_field_relative_positions=True,
+        )
+        self.config = self.core.config
+        self.max_x_tokens = max_x_tokens
+        self.max_answer_tokens = max_answer_tokens
+        width = source.D_MODEL
+        self.digit_norm = LocalRMSNorm(width)
+        self.pair_projection = torch.nn.Linear(2 * width, width)
+        self.pair_role = torch.nn.Parameter(torch.empty(width))
+        self.pair_mixer_norm = LocalRMSNorm(width)
+        self.pair_up = torch.nn.Linear(width, 4 * width)
+        self.pair_down = torch.nn.Linear(4 * width, width)
+        self.output_role = torch.nn.Parameter(torch.empty(width))
+        torch.nn.init.normal_(self.pair_role, std=0.02)
+        torch.nn.init.normal_(self.output_role, std=0.02)
+        self.workspace_blocks = torch.nn.ModuleList(
+            FullTokenBlock(width, source.NUM_HEADS) for _ in range(layers - 1)
+        )
+
+    def pair_tokens(
+        self,
+        x_states: Tensor,
+        x_valid: Tensor,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        """Construct symmetric content pairs and their composed decimal places."""
+
+        normalized = self.digit_norm(x_states)
+        left = normalized[:, :, None, :]
+        right = normalized[:, None, :, :]
+        symmetric_features = torch.cat(
+            (
+                left + right,
+                left * right,
+            ),
+            dim=-1,
+        )
+        pairs = self.pair_projection(symmetric_features) + self.pair_role
+        pairs = pairs + self.pair_down(
+            F.gelu(self.pair_up(self.pair_mixer_norm(pairs)))
+        )
+        pair_valid = x_valid[:, :, None] & x_valid[:, None, :]
+        places = torch.arange(
+            self.max_x_tokens - 1,
+            -1,
+            -1,
+            device=x_states.device,
+            dtype=torch.long,
+        )
+        pair_positions = places[:, None] + places[None, :]
+        batch = x_states.shape[0]
+        return (
+            pairs.reshape(batch, self.max_x_tokens**2, -1),
+            pair_valid.reshape(batch, self.max_x_tokens**2),
+            pair_positions.reshape(1, self.max_x_tokens**2).expand(batch, -1),
+        )
+
+    def forward(self, input_ids: Tensor, attention_mask: Tensor | None = None):
+        if attention_mask is None:
+            attention_mask = input_ids != 0
+        batch, prompt_length = input_ids.shape
+        fields, prompt_positions = digit_field_layout(input_ids)
+        prompt = self.core.token_embedding(input_ids)
+        prompt = prompt + self.core.field_embedding(fields)
+        prompt_rope = rope_from_positions(
+            prompt_positions,
+            self.core.source.D_MODEL // self.core.source.NUM_HEADS,
+            self.core.source.ROPE_BASE,
+            prompt.dtype,
+        )
+        for block in self.core.blocks:
+            prompt = block(prompt, attention_mask, prompt_rope)
+
+        x_states, x_valid = right_aligned_field_states(
+            prompt,
+            fields,
+            prompt_positions,
+            field_id=1,
+            slots=self.max_x_tokens,
+        )
+        pair_states, pair_valid, pair_positions = self.pair_tokens(
+            x_states, x_valid
+        )
+        output_states, output_valid = right_aligned_field_states(
+            prompt,
+            fields,
+            prompt_positions,
+            field_id=2,
+            slots=self.max_answer_tokens,
+        )
+        output_states = output_states + self.output_role
+        output_positions_from_right = torch.arange(
+            self.max_answer_tokens - 1,
+            -1,
+            -1,
+            device=input_ids.device,
+            dtype=input_ids.dtype,
+        ).expand(batch, -1)
+
+        context = torch.cat((prompt, pair_states, output_states), dim=1)
+        positions = torch.cat(
+            (prompt_positions, pair_positions, output_positions_from_right),
+            dim=1,
+        )
+        combined_mask = torch.cat(
+            (attention_mask.bool(), pair_valid, output_valid), dim=1
+        )
+        rope = rope_from_positions(
+            positions,
+            self.core.source.D_MODEL // self.core.source.NUM_HEADS,
+            self.core.source.ROPE_BASE,
+            context.dtype,
+        )
+        for block in self.workspace_blocks:
+            context = block(context, combined_mask, rope)
+
+        prompt_state = context[:, :prompt_length]
+        output_state = context[:, -self.max_answer_tokens :]
+        base_logits = self.core.head(self.core.final_norm(prompt_state))
+        output_logits = self.core.head(self.core.final_norm(output_state))
+        output_locations, location_valid = right_aligned_tape_layout(
+            attention_mask, self.max_answer_tokens
+        )
+        return merge_answer_logits(
+            base_logits,
+            output_locations,
+            location_valid & output_valid,
+            output_logits,
+        ), None
+
+
 class GRUAnswerWriter(torch.nn.Module):
     """R4x2 encoder with recurrent least-to-most-significant corrections."""
 
@@ -895,9 +1063,20 @@ def evaluate(
                 "predicted": predicted,
             }
             (passed if is_correct else failed).append(example)
+    non_leading_correct = sum(
+        values[0] for key, values in position_left.items() if key > 0
+    )
+    non_leading_total = sum(
+        values[1] for key, values in position_left.items() if key > 0
+    )
     result = {
         "exact_accuracy": exact / examples,
         "digit_accuracy": correct_digits / digit_count,
+        "non_leading_digit_accuracy": (
+            non_leading_correct / non_leading_total
+            if non_leading_total
+            else None
+        ),
         "accuracy_by_position_from_left": {
             str(key): {"correct": values[0], "total": values[1], "accuracy": values[0] / values[1]}
             for key, values in sorted(position_left.items())
@@ -952,6 +1131,7 @@ def main() -> None:
             "full_token",
             "full_token_recurrent",
             "full_token_digit_tape",
+            "full_token_pair_workspace",
             "full_token_gru_writer",
             "full_token_causal_writer",
         ),
@@ -996,6 +1176,7 @@ def main() -> None:
         "full_token",
         "full_token_recurrent",
         "full_token_digit_tape",
+        "full_token_pair_workspace",
     }:
         raise ValueError(
             "--field_relative_positions currently requires a full-token architecture"
@@ -1012,6 +1193,21 @@ def main() -> None:
         if args.soft_local_relations:
             raise ValueError(
                 "Experiment B excludes --soft_local_relations to stay isolated"
+            )
+    if args.architecture == "full_token_pair_workspace":
+        if args.task != "square_mod":
+            raise ValueError("full_token_pair_workspace requires --task square_mod")
+        if not args.field_relative_positions:
+            raise ValueError(
+                "full_token_pair_workspace requires --field_relative_positions"
+            )
+        if args.recurrences != 1:
+            raise ValueError(
+                "pair-workspace experiment is non-recurrent; use --recurrences 1"
+            )
+        if args.soft_local_relations or args.round_embeddings:
+            raise ValueError(
+                "pair-workspace experiment excludes relation and round embeddings"
             )
 
     torch.manual_seed(args.seed)
@@ -1054,9 +1250,22 @@ def main() -> None:
         for dataset in datasets.values()
         for record in dataset.records
     )
+    max_x_tokens = max(
+        int(record.get("x_digits", 0))
+        for dataset in datasets.values()
+        for record in dataset.records
+    )
     model_spec = ModelSpec(17, max_seq_len, 500_000_000)
     if args.architecture == "scratchpad":
         model = submission.build_model(model_spec)
+    elif args.architecture == "full_token_pair_workspace":
+        model = PairInteractionWorkspaceTransformer(
+            submission,
+            model_spec,
+            args.full_token_layers,
+            max_x_tokens,
+            max_answer_tokens,
+        )
     elif args.architecture == "full_token_digit_tape":
         model = DistributedDigitTapeTransformer(
             submission,

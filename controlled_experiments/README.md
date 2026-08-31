@@ -197,6 +197,31 @@ than modulus memorization. Improvement confined to `train` is a rejection. Do
 not vary recurrence count yet; extra inference micro-steps belong to Experiment
 E.
 
+### Experiment C0: non-recurrent pair-interaction workspace
+
+Because Experiment B did not learn non-leading digits, do not stack a pair grid
+on its blank recurrent tape. C0 instead tests the one-step arithmetic primitive
+directly. One prompt block contextualizes `X` and `N`; every pair of right-
+aligned `X` digits is then converted into a symmetric learned pair token. The
+pair token receives the sum of its two right-relative decimal coordinates, but
+there is no hard diagonal mask or multiplication rule. Three distinct workspace
+blocks let output queries, pair tokens, and modulus tokens interact once, with
+no weight recurrence.
+
+```bash
+python3 controlled_experiments/run_multiplication.py \
+  --task square_mod --preset easy --steps 1000 \
+  --architecture full_token_pair_workspace \
+  --full_token_layers 4 --recurrences 1 \
+  --loss token_ce --untie_embeddings --field_relative_positions
+```
+
+The evaluator records `non_leading_digit_accuracy` explicitly. C0 succeeds only
+if it both fits the train transition and raises this metric on `test_seen_n`;
+leading-digit or exact-sequence gains without non-leading improvement are not
+evidence of arithmetic. Do not add recurrence or explicit reduction phases to
+this run.
+
 Run the current scratchpad architecture locally with, for example:
 
 ```bash
