@@ -174,6 +174,29 @@ reducing `ood_n_long` digit accuracy. `test_seen_n` separates basic fitting from
 generalization to unseen moduli. Do not begin Experiment B until A0--A2 have
 been evaluated.
 
+### Experiment B: distributed recurrent digit tape
+
+Experiment B starts from A1 and appends one persistent latent slot per possible
+answer digit. Prompt tokens and tape slots pass through the same R4x2 blocks;
+there is no separate writer or additional Transformer block. All tape slots use
+one shared learned seed and field-relative RoPE, so the parameter increase over
+A1 is exactly one 256-dimensional vector. Variable-width targets supervise the
+right-aligned suffix of the tape.
+
+```bash
+python3 controlled_experiments/run_multiplication.py \
+  --task square_mod --preset easy --steps 1000 \
+  --architecture full_token_digit_tape \
+  --full_token_layers 4 --recurrences 2 \
+  --loss token_ce --untie_embeddings --field_relative_positions
+```
+
+Compare only against A1 at 1,000 steps. B is promising if `test_seen_n` rises
+materially, because that establishes that the tape improves computation rather
+than modulus memorization. Improvement confined to `train` is a rejection. Do
+not vary recurrence count yet; extra inference micro-steps belong to Experiment
+E.
+
 Run the current scratchpad architecture locally with, for example:
 
 ```bash

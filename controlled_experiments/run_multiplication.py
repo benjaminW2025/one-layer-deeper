@@ -458,6 +458,99 @@ def writer_position_features(
     return torch.cat((angles.cos(), angles.sin()), dim=-1).to(dtype)
 
 
+def right_aligned_tape_layout(
+    attention_mask: Tensor,
+    tape_tokens: int,
+) -> tuple[Tensor, Tensor]:
+    """Map fixed-width tape slots onto the right edge of each prompt."""
+
+    if attention_mask.ndim != 2:
+        raise ValueError("attention_mask must have shape [batch, length]")
+    lengths = attention_mask.to(torch.long).sum(dim=1)
+    offsets = torch.arange(tape_tokens, device=attention_mask.device)
+    positions = lengths[:, None] - tape_tokens + offsets[None, :]
+    valid = (positions >= 0) & (positions < attention_mask.shape[1])
+    return positions.clamp(0, attention_mask.shape[1] - 1), valid
+
+
+class DistributedDigitTapeTransformer(torch.nn.Module):
+    """Field-relative recurrent Transformer with one persistent slot per digit."""
+
+    def __init__(
+        self,
+        source,
+        spec: ModelSpec,
+        layers: int,
+        rounds: int,
+        max_answer_tokens: int,
+    ) -> None:
+        super().__init__()
+        self.core = FullTokenTransformer(
+            source,
+            spec,
+            layers,
+            rounds,
+            use_field_relative_positions=True,
+        )
+        self.config = self.core.config
+        self.max_answer_tokens = max_answer_tokens
+        self.tape_seed = torch.nn.Parameter(torch.empty(source.D_MODEL))
+        torch.nn.init.normal_(self.tape_seed, std=0.02)
+
+    def forward(self, input_ids: Tensor, attention_mask: Tensor | None = None):
+        if attention_mask is None:
+            attention_mask = input_ids != 0
+        batch, prompt_length = input_ids.shape
+        fields, prompt_positions = digit_field_layout(input_ids)
+        prompt = self.core.token_embedding(input_ids)
+        prompt = prompt + self.core.field_embedding(fields)
+
+        tape = self.tape_seed.view(1, 1, -1).expand(
+            batch, self.max_answer_tokens, -1
+        )
+        tape_positions = torch.arange(
+            self.max_answer_tokens - 1,
+            -1,
+            -1,
+            device=input_ids.device,
+            dtype=input_ids.dtype,
+        ).expand(batch, -1)
+        context = torch.cat((prompt, tape), dim=1)
+        positions = torch.cat((prompt_positions, tape_positions), dim=1)
+        tape_mask = torch.ones(
+            batch,
+            self.max_answer_tokens,
+            device=input_ids.device,
+            dtype=torch.bool,
+        )
+        combined_mask = torch.cat((attention_mask.bool(), tape_mask), dim=1)
+        rope = rope_from_positions(
+            positions,
+            self.core.source.D_MODEL // self.core.source.NUM_HEADS,
+            self.core.source.ROPE_BASE,
+            context.dtype,
+        )
+        for round_index in range(self.core.rounds):
+            if self.core.round_embeddings is not None:
+                context = context + self.core.round_embeddings[round_index]
+            for block in self.core.blocks:
+                context = block(context, combined_mask, rope)
+
+        prompt_state = context[:, :prompt_length]
+        tape_state = context[:, prompt_length:]
+        base_logits = self.core.head(self.core.final_norm(prompt_state))
+        tape_logits = self.core.head(self.core.final_norm(tape_state))
+        output_positions, output_valid = right_aligned_tape_layout(
+            attention_mask, self.max_answer_tokens
+        )
+        return merge_answer_logits(
+            base_logits,
+            output_positions,
+            output_valid,
+            tape_logits,
+        ), None
+
+
 class GRUAnswerWriter(torch.nn.Module):
     """R4x2 encoder with recurrent least-to-most-significant corrections."""
 
@@ -858,6 +951,7 @@ def main() -> None:
             "scratchpad",
             "full_token",
             "full_token_recurrent",
+            "full_token_digit_tape",
             "full_token_gru_writer",
             "full_token_causal_writer",
         ),
@@ -901,12 +995,24 @@ def main() -> None:
     if args.field_relative_positions and args.architecture not in {
         "full_token",
         "full_token_recurrent",
+        "full_token_digit_tape",
     }:
         raise ValueError(
             "--field_relative_positions currently requires a full-token architecture"
         )
     if args.soft_local_relations and not args.field_relative_positions:
         raise ValueError("--soft_local_relations requires --field_relative_positions")
+    if args.architecture == "full_token_digit_tape":
+        if args.task != "square_mod":
+            raise ValueError("full_token_digit_tape currently requires --task square_mod")
+        if not args.field_relative_positions:
+            raise ValueError(
+                "full_token_digit_tape requires --field_relative_positions"
+            )
+        if args.soft_local_relations:
+            raise ValueError(
+                "Experiment B excludes --soft_local_relations to stay isolated"
+            )
 
     torch.manual_seed(args.seed)
     device = torch.device(args.device)
@@ -951,6 +1057,14 @@ def main() -> None:
     model_spec = ModelSpec(17, max_seq_len, 500_000_000)
     if args.architecture == "scratchpad":
         model = submission.build_model(model_spec)
+    elif args.architecture == "full_token_digit_tape":
+        model = DistributedDigitTapeTransformer(
+            submission,
+            model_spec,
+            args.full_token_layers,
+            args.recurrences,
+            max_answer_tokens,
+        )
     elif args.architecture == "full_token_gru_writer":
         model = GRUAnswerWriter(
             submission,
