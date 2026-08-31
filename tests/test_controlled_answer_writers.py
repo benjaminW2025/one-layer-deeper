@@ -10,7 +10,9 @@ from controlled_experiments.run_multiplication import (
     CausalTransformerAnswerWriter,
     FullTokenTransformer,
     GRUAnswerWriter,
+    SoftLocalRelationBias,
     answer_slot_layout,
+    digit_field_layout,
     load_submission,
     operand_segment_ids,
 )
@@ -53,6 +55,59 @@ class ControlledAnswerWriterTests(unittest.TestCase):
                 [0, 1, 0, 2, 2, 2, 0],
             ],
         )
+
+    def test_digit_field_layout_counts_places_from_each_right_edge(self) -> None:
+        input_ids = torch.tensor(
+            [
+                [2, 8, 9, 3, 10, 11, 12, 0],
+                [2, 13, 14, 15, 3, 16, 7, 0],
+            ]
+        )
+        fields, positions = digit_field_layout(input_ids)
+        self.assertEqual(
+            fields.tolist(),
+            [
+                [0, 1, 1, 0, 2, 2, 2, 0],
+                [0, 1, 1, 1, 0, 2, 2, 0],
+            ],
+        )
+        self.assertEqual(
+            positions.tolist(),
+            [
+                [0, 1, 0, 0, 2, 1, 0, 0],
+                [0, 2, 1, 0, 0, 1, 0, 0],
+            ],
+        )
+
+    def test_soft_local_relations_start_as_noop_and_receive_gradient(self) -> None:
+        input_ids = torch.tensor([[2, 8, 9, 3, 10, 11]])
+        fields, positions = digit_field_layout(input_ids)
+        relations = SoftLocalRelationBias(heads=4)
+        bias = relations(fields, positions)
+        self.assertEqual(bias.shape, (1, 4, 6, 6))
+        self.assertEqual(bias.abs().sum().item(), 0.0)
+        target = torch.randn_like(bias)
+        (bias * target).sum().backward()
+        self.assertGreater(relations.weights.grad.abs().sum().item(), 0.0)
+        self.assertGreater(relations.field_pair_bias.grad.abs().sum().item(), 0.0)
+
+    def test_field_relative_model_forward_and_backward(self) -> None:
+        model = FullTokenTransformer(
+            self.source,
+            self.spec,
+            layers=1,
+            rounds=1,
+            use_field_relative_positions=True,
+            use_soft_local_relations=True,
+        )
+        input_ids = torch.tensor([[2, 8, 9, 3, 10, 11]])
+        logits, _ = model(input_ids, torch.ones_like(input_ids, dtype=torch.bool))
+        logits.square().mean().backward()
+        self.assertEqual(logits.shape, (1, 6, 17))
+        self.assertGreater(
+            model.field_embedding.weight.grad[1:].abs().sum().item(), 0.0
+        )
+        self.assertGreater(model.relation_bias.weights.grad.abs().sum().item(), 0.0)
 
     def test_full_token_operand_embeddings_receive_gradient(self) -> None:
         model = FullTokenTransformer(

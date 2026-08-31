@@ -140,6 +140,7 @@ class FullTokenBlock(torch.nn.Module):
         context: Tensor,
         attention_mask: Tensor | None,
         rope: tuple[Tensor, Tensor],
+        relation_bias: Tensor | None = None,
     ) -> Tensor:
         residual = context
         context = self.attention_norm(context)
@@ -151,7 +152,18 @@ class FullTokenBlock(torch.nn.Module):
         cos, sin = rope
         q = apply_rope(q, cos, sin)
         k = apply_rope(k, cos, sin)
-        mask = attention_mask[:, None, None, :].bool() if attention_mask is not None else None
+        if relation_bias is not None:
+            mask = relation_bias
+            if attention_mask is not None:
+                mask = mask.masked_fill(
+                    ~attention_mask[:, None, None, :].bool(), -torch.inf
+                )
+        else:
+            mask = (
+                attention_mask[:, None, None, :].bool()
+                if attention_mask is not None
+                else None
+            )
         context = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
         context = context.transpose(1, 2).contiguous().view(batch, length, self.width)
         context = residual + self.out(context)
@@ -177,6 +189,90 @@ def operand_segment_ids(
     return torch.where(is_digit & after_b, 2, segments)
 
 
+def digit_field_layout(
+    input_ids: Tensor,
+    *,
+    first_field_token_id: int = 2,
+    second_field_token_id: int = 3,
+    digit_offset: int = 7,
+) -> tuple[Tensor, Tensor]:
+    """Return digit field IDs and positions counted from each field's right edge."""
+
+    fields = operand_segment_ids(
+        input_ids,
+        operand_a_token_id=first_field_token_id,
+        operand_b_token_id=second_field_token_id,
+        digit_offset=digit_offset,
+    )
+    is_digit = input_ids >= digit_offset
+    right_positions = torch.zeros_like(input_ids)
+    running = torch.zeros(input_ids.shape[0], device=input_ids.device, dtype=input_ids.dtype)
+    for column in range(input_ids.shape[1] - 1, -1, -1):
+        active = is_digit[:, column]
+        right_positions[:, column] = torch.where(active, running, 0)
+        running = torch.where(active, running + 1, 0)
+    return fields, right_positions
+
+
+def rope_from_positions(
+    positions: Tensor,
+    head_dim: int,
+    rope_base: float,
+    dtype: torch.dtype,
+) -> tuple[Tensor, Tensor]:
+    """RoPE tables for per-example coordinates, broadcastable over attention heads."""
+
+    half = head_dim // 2
+    inverse_frequency = rope_base ** (
+        -torch.arange(half, device=positions.device, dtype=torch.float32) / half
+    )
+    angles = positions.to(torch.float32).unsqueeze(-1) * inverse_frequency
+    angles = torch.cat((angles, angles), dim=-1).unsqueeze(1)
+    return angles.cos().to(dtype), angles.sin().to(dtype)
+
+
+class SoftLocalRelationBias(torch.nn.Module):
+    """Learned soft routing over generic field-relative distance features."""
+
+    def __init__(self, heads: int) -> None:
+        super().__init__()
+        # Zero initialization makes this an exact no-op at construction. Heads
+        # learn their own mixtures; none is assigned an arithmetic role.
+        self.weights = torch.nn.Parameter(torch.zeros(heads, 8))
+        self.field_pair_bias = torch.nn.Parameter(torch.zeros(heads, 3, 3))
+
+    def forward(self, fields: Tensor, right_positions: Tensor) -> Tensor:
+        query_position = right_positions[:, :, None]
+        key_position = right_positions[:, None, :]
+        distance = (query_position - key_position).to(torch.float32)
+        absolute_distance = distance.abs()
+        query_field = fields[:, :, None]
+        key_field = fields[:, None, :]
+        both_digits = (query_field > 0) & (key_field > 0)
+        same_field = query_field == key_field
+        same_place = absolute_distance == 0
+        adjacent = absolute_distance == 1
+        features = torch.stack(
+            (
+                same_place & same_field,
+                adjacent & same_field,
+                torch.exp(-absolute_distance) * same_field,
+                torch.exp(-absolute_distance / 4.0) * same_field,
+                same_place & ~same_field,
+                adjacent & ~same_field,
+                torch.exp(-absolute_distance) * ~same_field,
+                torch.exp(-absolute_distance / 4.0) * ~same_field,
+            ),
+            dim=-1,
+        ).to(self.weights.dtype)
+        features = features * both_digits.unsqueeze(-1)
+        bias = torch.einsum("bijr,hr->bhij", features, self.weights)
+        field_pairs = query_field * 3 + key_field
+        pair_table = self.field_pair_bias.reshape(self.weights.shape[0], 9)
+        pair_bias = pair_table[:, field_pairs].permute(1, 0, 2, 3)
+        return bias + pair_bias * both_digits[:, None]
+
+
 class FullTokenTransformer(torch.nn.Module):
     """A conventional bidirectional Transformer for the learnability check."""
 
@@ -188,10 +284,13 @@ class FullTokenTransformer(torch.nn.Module):
         rounds: int = 1,
         use_round_embeddings: bool = False,
         use_operand_embeddings: bool = False,
+        use_field_relative_positions: bool = False,
+        use_soft_local_relations: bool = False,
     ) -> None:
         super().__init__()
         self.source = source
         self.rounds = rounds
+        self.use_field_relative_positions = use_field_relative_positions
         self.round_embeddings = (
             torch.nn.Parameter(torch.empty(rounds, source.D_MODEL))
             if use_round_embeddings
@@ -210,6 +309,20 @@ class FullTokenTransformer(torch.nn.Module):
             torch.nn.init.normal_(self.operand_embedding.weight[1:], std=0.02)
             with torch.no_grad():
                 self.operand_embedding.weight[0].zero_()
+        self.field_embedding = (
+            torch.nn.Embedding(3, source.D_MODEL, padding_idx=0)
+            if use_field_relative_positions
+            else None
+        )
+        if self.field_embedding is not None:
+            torch.nn.init.normal_(self.field_embedding.weight[1:], std=0.02)
+            with torch.no_grad():
+                self.field_embedding.weight[0].zero_()
+        self.relation_bias = (
+            SoftLocalRelationBias(source.NUM_HEADS)
+            if use_soft_local_relations
+            else None
+        )
         self.blocks = torch.nn.ModuleList(
             FullTokenBlock(source.D_MODEL, source.NUM_HEADS) for _ in range(layers)
         )
@@ -226,17 +339,36 @@ class FullTokenTransformer(torch.nn.Module):
             context = context + self.operand_embedding(
                 operand_segment_ids(input_ids)
             )
-        rope = self.source.rope_tables(
-            input_ids.shape[1],
-            self.source.D_MODEL // self.source.NUM_HEADS,
-            context.device,
-            context.dtype,
+        fields: Tensor | None = None
+        right_positions: Tensor | None = None
+        if self.use_field_relative_positions:
+            fields, right_positions = digit_field_layout(input_ids)
+            context = context + self.field_embedding(fields)
+            rope = rope_from_positions(
+                right_positions,
+                self.source.D_MODEL // self.source.NUM_HEADS,
+                self.source.ROPE_BASE,
+                context.dtype,
+            )
+        else:
+            rope = self.source.rope_tables(
+                input_ids.shape[1],
+                self.source.D_MODEL // self.source.NUM_HEADS,
+                context.device,
+                context.dtype,
+            )
+        relation_bias = (
+            self.relation_bias(fields, right_positions).to(context.dtype)
+            if self.relation_bias is not None
+            and fields is not None
+            and right_positions is not None
+            else None
         )
         for round_index in range(self.rounds):
             if self.round_embeddings is not None:
                 context = context + self.round_embeddings[round_index]
             for block in self.blocks:
-                context = block(context, attention_mask, rope)
+                context = block(context, attention_mask, rope, relation_bias)
         return context
 
     def forward(self, input_ids: Tensor, attention_mask: Tensor | None = None):
@@ -735,6 +867,8 @@ def main() -> None:
     parser.add_argument("--writer_layers", type=int, default=2)
     parser.add_argument("--round_embeddings", action="store_true")
     parser.add_argument("--operand_embeddings", action="store_true")
+    parser.add_argument("--field_relative_positions", action="store_true")
+    parser.add_argument("--soft_local_relations", action="store_true")
     parser.add_argument("--untie_embeddings", action="store_true")
     parser.add_argument("--scratchpad_slots", type=int, default=4)
     parser.add_argument("--recurrences", type=int, default=4)
@@ -762,6 +896,17 @@ def main() -> None:
         raise ValueError(
             "--operand_embeddings currently requires a full-token architecture"
         )
+    if args.field_relative_positions and args.task != "square_mod":
+        raise ValueError("--field_relative_positions currently requires --task square_mod")
+    if args.field_relative_positions and args.architecture not in {
+        "full_token",
+        "full_token_recurrent",
+    }:
+        raise ValueError(
+            "--field_relative_positions currently requires a full-token architecture"
+        )
+    if args.soft_local_relations and not args.field_relative_positions:
+        raise ValueError("--soft_local_relations requires --field_relative_positions")
 
     torch.manual_seed(args.seed)
     device = torch.device(args.device)
@@ -836,6 +981,8 @@ def main() -> None:
             rounds,
             args.round_embeddings,
             args.operand_embeddings,
+            args.field_relative_positions,
+            args.soft_local_relations,
         )
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.95), weight_decay=0.1)
@@ -873,6 +1020,8 @@ def main() -> None:
         "writer_layers": args.writer_layers,
         "round_embeddings": args.round_embeddings,
         "operand_embeddings": args.operand_embeddings,
+        "field_relative_positions": args.field_relative_positions,
+        "soft_local_relations": args.soft_local_relations,
         "untie_embeddings": args.untie_embeddings,
         "parameter_count": sum(parameter.numel() for parameter in model.parameters()),
     }
@@ -893,6 +1042,8 @@ def main() -> None:
         f"{args.task}_{args.preset}_{args.architecture}_slots{args.scratchpad_slots}_r{args.recurrences}"
         f"_reader{args.prompt_reader_layers}_clock{int(args.round_embeddings)}"
         f"_operand{int(args.operand_embeddings)}"
+        f"_fieldpos{int(args.field_relative_positions)}"
+        f"_relations{int(args.soft_local_relations)}"
         f"_loss{args.loss}_untied{int(args.untie_embeddings)}"
         f"_s{args.steps}_seed{args.seed}.json"
     )

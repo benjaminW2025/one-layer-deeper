@@ -136,6 +136,44 @@ python3 controlled_experiments/run_multiplication.py \
 The result includes exact and digit accuracy, accuracy at every output position
 from both edges, and buckets by input, modulus, square, and quotient lengths.
 
+### Experiment A: field-relative pattern routing
+
+This experiment changes addressing only. It does not add scratch tokens,
+recurrent state, multiplication pairs, or a reducer. Run the three conditions
+separately at the same seed and update count:
+
+```bash
+# A0: unchanged absolute-RoPE R4x2 baseline
+python3 controlled_experiments/run_multiplication.py \
+  --task square_mod --preset easy --steps 1000 \
+  --architecture full_token_recurrent --full_token_layers 4 --recurrences 2 \
+  --loss token_ce --untie_embeddings
+
+# A1: field embeddings plus RoPE positions counted from each field's right edge
+python3 controlled_experiments/run_multiplication.py \
+  --task square_mod --preset easy --steps 1000 \
+  --architecture full_token_recurrent --full_token_layers 4 --recurrences 2 \
+  --loss token_ce --untie_embeddings --field_relative_positions
+
+# A2: A1 plus zero-initialized soft relative-relation biases
+python3 controlled_experiments/run_multiplication.py \
+  --task square_mod --preset easy --steps 1000 \
+  --architecture full_token_recurrent --full_token_layers 4 --recurrences 2 \
+  --loss token_ce --untie_embeddings --field_relative_positions \
+  --soft_local_relations
+```
+
+The soft relation mechanism never masks a valid token pair. Each head learns a
+mixture of same-place, adjacent-place, and smooth distance features within and
+across fields. Its weights start at zero, making A2 identical to A1 before
+training except for the dormant parameters.
+
+Treat 1,000 steps as a screen, not a final result. Promote a condition to a
+matched 4,000-step run only if it improves `test` digit accuracy without
+reducing `ood_n_long` digit accuracy. `test_seen_n` separates basic fitting from
+generalization to unseen moduli. Do not begin Experiment B until A0--A2 have
+been evaluated.
+
 Run the current scratchpad architecture locally with, for example:
 
 ```bash
